@@ -2,8 +2,8 @@
 This repository contains our code for our mobile version of the Multi-Language Wellness App
 
 # Starting the code 
-npm install
-npx expo start
+- npm install
+- npx expo start
 
 # Viewing the app on mobile
 1) Download Expo Go on your mobile device

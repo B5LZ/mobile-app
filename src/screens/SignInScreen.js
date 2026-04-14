@@ -14,6 +14,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../config/firebaseConfig';
+import { useLanguage } from '../context/LanguageContext';
+import { KOREAN_NATIVE_LABEL } from '../i18n/labels';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { ThemeColor, ThemeGradient, ThemeRadius } from '../theme/appTheme';
 
@@ -25,15 +27,22 @@ function clamp(n, min, max) {
 }
 
 export default function SignInScreen({ navigation }) {
+  const { locale, setLocale, t } = useLanguage();
   const { width: windowWidth } = useWindowDimensions();
   const logoSize = Math.round(clamp(windowWidth * 0.572, 154, 242));
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  const toggleUILanguage = () => {
+    void setLocale(locale === 'en' ? 'ko' : 'en');
+  };
+
+  const cornerLabel = locale === 'en' ? KOREAN_NATIVE_LABEL : 'English';
+
   const handleSignIn = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter both email and password.');
+      Alert.alert(t('errorTitle'), t('signInErrorBothFields'));
       return;
     }
 
@@ -41,10 +50,7 @@ export default function SignInScreen({ navigation }) {
       await signInWithEmailAndPassword(auth, email, password);
       navigation.navigate('Home');
     } catch (error) {
-      Alert.alert(
-        'Sign In Failed',
-        'Invalid email or password. Please try again.',
-      );
+      Alert.alert(t('signInFailedTitle'), t('signInFailedBody'));
     }
   };
 
@@ -55,6 +61,23 @@ export default function SignInScreen({ navigation }) {
       style={styles.screenGradient}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.langCorner}>
+          <Pressable
+            onPress={toggleUILanguage}
+            style={({ pressed }) => [
+              styles.langCornerBtn,
+              pressed && styles.langCornerBtnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              locale === 'en'
+                ? 'Switch to Korean'
+                : 'Switch to English'
+            }
+          >
+            <Text style={styles.langCornerText}>{cornerLabel}</Text>
+          </Pressable>
+        </View>
         <View style={styles.layout}>
           <View style={styles.content}>
             <View style={styles.logoSlot}>
@@ -65,8 +88,8 @@ export default function SignInScreen({ navigation }) {
               />
             </View>
 
-            <Text style={styles.title}>Welcome</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
+            <Text style={styles.title}>{t('signInWelcome')}</Text>
+            <Text style={styles.subtitle}>{t('signInSubtitle')}</Text>
 
             <View style={styles.fieldGroup}>
               <View style={styles.inputShell}>
@@ -79,7 +102,7 @@ export default function SignInScreen({ navigation }) {
                 <TextInput
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="Email"
+                  placeholder={t('email')}
                   placeholderTextColor={ThemeColor.PLACEHOLDER}
                   autoCapitalize="none"
                   keyboardType="email-address"
@@ -98,7 +121,7 @@ export default function SignInScreen({ navigation }) {
                 <TextInput
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="Password"
+                  placeholder={t('password')}
                   placeholderTextColor={ThemeColor.PLACEHOLDER}
                   secureTextEntry
                   style={styles.inputInner}
@@ -121,7 +144,9 @@ export default function SignInScreen({ navigation }) {
                   style={styles.buttonGradient}
                 >
                   <View style={styles.buttonInner}>
-                    <Text style={styles.primaryButtonText}>Sign In</Text>
+                    <Text style={styles.primaryButtonText}>
+                      {t('signInButton')}
+                    </Text>
                     <View style={styles.buttonChevron}>
                       <Ionicons
                         name="chevron-forward"
@@ -147,15 +172,12 @@ export default function SignInScreen({ navigation }) {
                 color={ThemeColor.BRAND}
                 style={styles.signUpIcon}
               />
-              <Text style={styles.link}>Need an account? Sign up</Text>
+              <Text style={styles.link}>{t('signUpPrompt')}</Text>
             </Pressable>
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Internal preview — University of Massachusetts Boston. Not for public
-              distribution.
-            </Text>
+            <Text style={styles.footerText}>{t('signInFooter')}</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -169,6 +191,32 @@ const styles = StyleSheet.create({
   },
   safe: {
     flex: 1,
+  },
+  langCorner: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingTop: 2,
+    paddingBottom: 4,
+    maxWidth: 440,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  langCornerBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: ThemeRadius.SM,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 99, 235, 0.25)',
+  },
+  langCornerBtnPressed: {
+    opacity: 0.82,
+  },
+  langCornerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: ThemeColor.BRAND,
   },
   layout: {
     flex: 1,

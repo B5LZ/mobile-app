@@ -1,62 +1,90 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View, Alert } from 'react-native';
+import { useLayoutEffect, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  Alert,
+} from 'react-native';
 import { ThemeColor, ThemeRadius } from '../theme/appTheme';
-// Import Firebase services from your config file
-import { auth, db } from '../config/firebaseConfig'; 
+import { auth, db } from '../config/firebaseConfig';
+import { useLanguage } from '../context/LanguageContext';
+import { KOREAN_NATIVE_LABEL } from '../i18n/labels';
+import { STRINGS } from '../i18n/strings';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
 export default function SignUpScreen({ navigation }) {
+  const { hydrateLocale, locale } = useLanguage();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [languagePreference, setLanguagePreference] = useState(
+    /** @type {'en' | 'ko'} */ (locale),
+  );
+
+  const copy = STRINGS[languagePreference];
+
+  useLayoutEffect(() => {
+    const c = STRINGS[languagePreference];
+    navigation.setOptions({
+      title: c.signUpHeader,
+      headerBackTitle: c.signInButton,
+    });
+  }, [navigation, languagePreference]);
+
+  const setLanguage = (/** @type {'en' | 'ko'} */ code) => {
+    setLanguagePreference(code);
+    hydrateLocale(code);
+  };
 
   const handleSignUp = async () => {
-    // Basic validation
     if (!email || !password || !name) {
-      Alert.alert("Error", "Please fill in all fields.");
+      Alert.alert(copy.errorTitle, copy.errorFillAll);
       return;
     }
 
     try {
-      // 1. Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
       const user = userCredential.user;
 
-      // 2. Create the user profile document in Firestore
-      await setDoc(doc(db, "users", user.uid), {
+      await setDoc(doc(db, 'users', user.uid), {
         fullName: name,
-        email: email,
-        languagePreference: 'en', // Default setting
+        email,
+        languagePreference,
         createdAt: new Date(),
-        totalSessionTime: 0
+        totalSessionTime: 0,
       });
 
-      // 3. Navigate to Home
+      hydrateLocale(languagePreference);
       navigation.replace('Home');
     } catch (error) {
-      // Handle common Firebase errors (e.g., email already in use)
       let errorMessage = error.message;
       if (error.code === 'auth/email-already-in-use') {
-        errorMessage = "That email address is already in use.";
+        errorMessage = copy.emailInUse;
       }
-      Alert.alert("Sign Up Failed", errorMessage);
+      Alert.alert(copy.signUpFailed, errorMessage);
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Create account</Text>
+      <Text style={styles.title}>{copy.createAccountTitle}</Text>
       <TextInput
         value={name}
         onChangeText={setName}
-        placeholder="Full name"
+        placeholder={copy.fullName}
         style={styles.input}
       />
       <TextInput
         value={email}
         onChangeText={setEmail}
-        placeholder="Email"
+        placeholder={copy.email}
         autoCapitalize="none"
         keyboardType="email-address"
         style={styles.input}
@@ -64,18 +92,54 @@ export default function SignUpScreen({ navigation }) {
       <TextInput
         value={password}
         onChangeText={setPassword}
-        placeholder="Password"
+        placeholder={copy.password}
         secureTextEntry
         style={styles.input}
       />
-      <Pressable
-        style={styles.primaryButton}
-        onPress={handleSignUp}
-      >
-        <Text style={styles.primaryButtonText}>Create Account</Text>
+
+      <Text style={styles.fieldLabel}>{copy.languageLabel}</Text>
+      <View style={styles.langRow}>
+        <Pressable
+          onPress={() => setLanguage('en')}
+          style={({ pressed }) => [
+            styles.langChip,
+            languagePreference === 'en' && styles.langChipSelected,
+            pressed && styles.langChipPressed,
+          ]}
+        >
+          <Text
+            style={[
+              styles.langChipText,
+              languagePreference === 'en' && styles.langChipTextSelected,
+            ]}
+          >
+            {copy.langEnglish}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setLanguage('ko')}
+          style={({ pressed }) => [
+            styles.langChip,
+            languagePreference === 'ko' && styles.langChipSelected,
+            pressed && styles.langChipPressed,
+          ]}
+        >
+          <Text
+            style={[
+              styles.langChipText,
+              languagePreference === 'ko' && styles.langChipTextSelected,
+            ]}
+          >
+            {KOREAN_NATIVE_LABEL}
+          </Text>
+        </Pressable>
+      </View>
+
+      <Pressable style={styles.primaryButton} onPress={handleSignUp}>
+        <Text style={styles.primaryButtonText}>{copy.createAccountButton}</Text>
       </Pressable>
       <Pressable onPress={() => navigation.goBack()}>
-        <Text style={styles.link}>Already have an account? Sign in</Text>
+        <Text style={styles.link}>{copy.alreadyHaveAccount}</Text>
       </Pressable>
     </View>
   );
@@ -93,6 +157,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: ThemeColor.BRAND,
     marginBottom: 18,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: ThemeColor.HOME_CARD_TEXT,
+    marginBottom: 8,
+  },
+  langRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  langChip: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: ThemeRadius.SM,
+    borderWidth: 1,
+    borderColor: ThemeColor.INPUT_BORDER_SOFT,
+    backgroundColor: ThemeColor.WHITE,
+    alignItems: 'center',
+  },
+  langChipSelected: {
+    borderColor: ThemeColor.BRAND,
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+  },
+  langChipPressed: {
+    opacity: 0.85,
+  },
+  langChipText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: ThemeColor.HOME_CARD_TEXT,
+  },
+  langChipTextSelected: {
+    color: ThemeColor.BRAND,
   },
   input: {
     backgroundColor: ThemeColor.WHITE,

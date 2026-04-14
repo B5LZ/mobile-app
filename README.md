@@ -1,5 +1,9 @@
 # mobile-app
-This repository contains our code for our mobile version of the Multi-Language Wellness App
+This repository contains our code for our mobile version of the Multi-Language Wellness App.
+The project is built using JS and React Native.
+
+# Setting Up
+- Once you clone the repository, you must create a .env locally at the root level and place the Firebase keys in there to use the database.
 
 # Starting the code 
 - npm install

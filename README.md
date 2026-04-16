@@ -7,8 +7,9 @@ The project is built using JS and React Native.
 
 # Starting the code 
 - npm install
-- npm start (default: tunnel mode for reliable Expo Go loading)
-- npm run start:lan (optional: same-network LAN mode)
+- **npm start** — tunnel mode (default for the team; reliable Expo Go on Mac when LAN is blocked)
+- **npm run start:lan** — same Wi‑Fi as your phone; use this if tunnel fails (e.g. ngrok `reading 'body'` on Windows) or you prefer LAN
+- `npm run start:tunnel` — same as `npm start`
 
 # Viewing the app on mobile
 1) Download Expo Go on your mobile device
@@ -31,7 +32,7 @@ That means the **phone cannot reach the dev server** on your Mac (LAN QR uses yo
 
 ```bash
 npm install
-npm run start:tunnel
+npm start
 ```
 
 `@expo/ngrok` is listed in **devDependencies** so everyone gets the same tunnel package after `npm install`. Prefer that over letting Expo install it **globally** (global installs sometimes misbehave).
@@ -50,4 +51,4 @@ Scan the **tunnel** QR code (it will look different from the normal LAN URL).
 3. Restart the dev server in LAN mode: `npx expo start --lan -c` (or `npm run start:lan -- --clear`).
 4. **Expo Go** must be a recent version compatible with **Expo SDK 54** (update from the App Store).
 
-If tunnel works but LAN does not, keep using **`npm run start:tunnel`** for demos until LAN/firewall is fixed.
+If tunnel works but LAN does not, keep using **`npm start`** (tunnel) for demos until LAN/firewall is fixed.

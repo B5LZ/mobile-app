@@ -11,6 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { ThemeColor, ThemeGradient, ThemeRadius } from '../theme/appTheme';
 import { auth, db } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
@@ -19,11 +20,19 @@ import { STRINGS } from '../i18n/strings';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
+function formatDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 export default function SignUpScreen({ navigation }) {
   const { hydrateLocale, locale } = useLanguage();
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
+  const [dobDate, setDobDate] = useState(new Date(2000, 0, 1));
+  const [showPicker, setShowPicker] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -44,6 +53,15 @@ export default function SignUpScreen({ navigation }) {
   const setLanguage = (/** @type {'en' | 'ko'} */ code) => {
     setLanguagePreference(code);
     hydrateLocale(code);
+  };
+
+  const onDateChange = (event, selectedDate) => {
+    if (Platform.OS === 'android') setShowPicker(false);
+    if (event.type === 'dismissed') return;
+    if (selectedDate) {
+      setDobDate(selectedDate);
+      setDob(formatDate(selectedDate));
+    }
   };
 
   const handleSignUp = async () => {
@@ -132,18 +150,48 @@ export default function SignUpScreen({ navigation }) {
                 />
               </View>
 
-              {/* Date of Birth */}
-              <View style={styles.inputShell}>
+              {/* Date of Birth — tappable field */}
+              <Pressable
+                onPress={() => setShowPicker(true)}
+                style={styles.inputShell}
+              >
                 <Ionicons name="calendar-outline" size={20} color={ThemeColor.TEXT_MUTED} style={styles.inputIcon} />
-                <TextInput
-                  value={dob}
-                  onChangeText={setDob}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={ThemeColor.PLACEHOLDER}
-                  keyboardType="numbers-and-punctuation"
-                  style={styles.inputInner}
+                <Text style={[styles.inputInner, !dob && { color: ThemeColor.PLACEHOLDER }]}>
+                  {dob || 'Date of birth'}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={ThemeColor.TEXT_MUTED} />
+              </Pressable>
+
+              {/* iOS: inline spinner picker */}
+              {showPicker && Platform.OS === 'ios' && (
+                <View style={styles.iosPickerWrapper}>
+                  <DateTimePicker
+                    value={dobDate}
+                    mode="date"
+                    display="spinner"
+                    maximumDate={new Date()}
+                    onChange={onDateChange}
+                    style={styles.iosPicker}
+                  />
+                  <Pressable
+                    onPress={() => setShowPicker(false)}
+                    style={styles.iosPickerDone}
+                  >
+                    <Text style={styles.iosPickerDoneText}>Done</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* Android: system date picker dialog */}
+              {showPicker && Platform.OS === 'android' && (
+                <DateTimePicker
+                  value={dobDate}
+                  mode="date"
+                  display="default"
+                  maximumDate={new Date()}
+                  onChange={onDateChange}
                 />
-              </View>
+              )}
 
               {/* Email */}
               <View style={styles.inputShell}>
@@ -321,7 +369,29 @@ const styles = StyleSheet.create({
     color: ThemeColor.TEXT_PRIMARY,
     fontWeight: '400',
   },
-  ageInput: { color: ThemeColor.TEXT_MUTED, fontSize: 15 },
+  iosPickerWrapper: {
+    backgroundColor: ThemeColor.INPUT_BG,
+    borderWidth: 1,
+    borderColor: ThemeColor.INPUT_BORDER,
+    borderRadius: ThemeRadius.SM,
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  iosPicker: {
+    width: '100%',
+  },
+  iosPickerDone: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: ThemeColor.INPUT_BORDER,
+  },
+  iosPickerDoneText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: ThemeColor.BRAND,
+  },
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',

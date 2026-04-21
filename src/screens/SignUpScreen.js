@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   View,
   Alert,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,14 +42,6 @@ export default function SignUpScreen({ navigation }) {
   );
 
   const copy = STRINGS[languagePreference];
-
-  useLayoutEffect(() => {
-    const c = STRINGS[languagePreference];
-    navigation.setOptions({
-      title: c.signUpHeader,
-      headerBackTitle: c.signInButton,
-    });
-  }, [navigation, languagePreference]);
 
   const setLanguage = (/** @type {'en' | 'ko'} */ code) => {
     setLanguagePreference(code);
@@ -115,7 +108,16 @@ export default function SignUpScreen({ navigation }) {
       style={styles.screenGradient}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.langCorner}>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={12}
+          >
+            <Ionicons name="chevron-back" size={28} color={ThemeColor.BRAND} />
+          </Pressable>
           <Pressable
             onPress={() => setLanguage(languagePreference === 'en' ? 'ko' : 'en')}
             style={({ pressed }) => [
@@ -131,7 +133,13 @@ export default function SignUpScreen({ navigation }) {
         </View>
 
         <View style={styles.layout}>
-          <View style={styles.content}>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.content}>
             <Text style={styles.title}>{copy.createAccountTitle}</Text>
             <Text style={styles.subtitle}>{copy.signInSubtitle ?? 'Join your mindfulness journey'}</Text>
 
@@ -297,7 +305,8 @@ export default function SignUpScreen({ navigation }) {
               <Ionicons name="log-in-outline" size={18} color={ThemeColor.BRAND} style={styles.signInIcon} />
               <Text style={styles.link}>{copy.alreadyHaveAccount}</Text>
             </Pressable>
-          </View>
+            </View>
+          </ScrollView>
         </View>
       </SafeAreaView>
     </LinearGradient>
@@ -307,16 +316,24 @@ export default function SignUpScreen({ navigation }) {
 const styles = StyleSheet.create({
   screenGradient: { flex: 1 },
   safe: { flex: 1 },
-  langCorner: {
+  topBar: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
     paddingTop: 2,
-    paddingBottom: 4,
+    paddingBottom: 8,
     maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
   },
+  backBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  backBtnPressed: { opacity: 0.7 },
   langCornerBtn: {
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -328,12 +345,12 @@ const styles = StyleSheet.create({
   langCornerBtnPressed: { opacity: 0.82 },
   langCornerText: { fontSize: 15, fontWeight: '700', color: ThemeColor.BRAND },
   layout: { flex: 1, maxWidth: 440, width: '100%', alignSelf: 'center' },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 24 },
   content: {
-    flex: 1,
     paddingHorizontal: 28,
     paddingTop: 8,
-    paddingBottom: 16,
-    justifyContent: 'flex-start',
+    paddingBottom: 8,
   },
   title: {
     fontSize: 28,

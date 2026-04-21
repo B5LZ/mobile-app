@@ -63,13 +63,13 @@ export const STRINGS = {
     homeTitle: '마음챙김 도우미',
     homeSubtitle: '마음챙김 가상 도우미',
     chatPlaceholder: '[ AI 챗봇 UI 자리 ]',
-    cardAboutTitle: '도우미 소개',
+    cardAboutTitle: '어시스턴트 소개',
     cardAboutText:
       'AI가 마음챙김 활동을 안내하도록 학습되었습니다.',
     cardUsageTitle: '이용 안내',
-    cardUsageText: '조용한 공간에서 호흡 안내를 따라 해 보세요.',
+    cardUsageText: '조용한 공간에서 안내에 따라 호흡해보세요.',
     cardUpdatesTitle: '최근 업데이트',
-    cardUpdatesText: '한국어 처리가 최근에 개선되었습니다.',
+    cardUpdatesText: '한국어 지원이 최근에 개선되었습니다.',
     cardSettingsTitle: '빠른 설정',
     cardSettingsText: '화면 및 접근성 옵션을 여기에서 조정할 수 있습니다.',
     languageHeading: '언어',
@@ -85,6 +85,6 @@ export const STRINGS = {
       '이메일 또는 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.',
     signUpPrompt: '계정이 없으신가요? 가입하기',
     signInFooter:
-      'UMass Boston 사내 미리보기. 외부 배포 금지.',
+      '내부 프리뷰 버전 - UMass Boston. 외부 배포 금지.',
   },
 };

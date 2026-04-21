@@ -1,60 +1,51 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   BackHandler,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '../config/firebaseConfig';
+import { auth } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
 import { KOREAN_NATIVE_LABEL } from '../i18n/labels';
 import { ThemeColor, ThemeRadius } from '../theme/appTheme';
-import { formatSessionDuration } from '../utils/formatDuration';
+
+const SESSION_COUNT = 12;
+const GRID_COLS = 2;
+const GRID_ROWS = Math.ceil(SESSION_COUNT / GRID_COLS);
+
+/** 1–12 distributed across 6 rows of 2. */
+const SESSION_ROWS = Array.from({ length: GRID_ROWS }, (_, r) => {
+  const start = r * GRID_COLS;
+  return Array.from({ length: GRID_COLS }, (_, i) => start + i + 1).filter(
+    (n) => n <= SESSION_COUNT,
+  );
+});
+
+function getTodaysRecommendedSession() {
+  const d = new Date();
+  const dayKey =
+    d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  return (dayKey % SESSION_COUNT) + 1;
+}
+
+function sessionLabel(t, n) {
+  return `${t('homeSession')} ${n}`;
+}
 
 export default function HomeScreen({ navigation }) {
   const { locale, setLocale, t } = useLanguage();
-  const [totalSessionSeconds, setTotalSessionSeconds] = useState(0);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      const user = auth.currentUser;
-      if (!user) return undefined;
-      const unsub = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-        if (snap.exists) {
-          const v = snap.data().totalSessionTime;
-          setTotalSessionSeconds(typeof v === 'number' ? v : 0);
-        }
-      });
-      return () => unsub();
-    }, []),
-  );
-
-  const cards = useMemo(
-    () => [
-      {
-        title: t('cardAboutTitle'),
-        text: t('cardAboutText'),
-      },
-      {
-        title: t('cardUsageTitle'),
-        text: t('cardUsageText'),
-      },
-      {
-        title: t('cardUpdatesTitle'),
-        text: t('cardUpdatesText'),
-      },
-      {
-        title: t('cardSettingsTitle'),
-        text: t('cardSettingsText'),
-      },
-    ],
-    [t],
-  );
+  const todaysSession = useMemo(() => getTodaysRecommendedSession(), []);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -68,26 +59,14 @@ export default function HomeScreen({ navigation }) {
     });
   }, [navigation]);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      title: t('homeTitle'),
-      headerBackVisible: false,
-      headerLeft: () => null,
-      gestureEnabled: false,
-      headerRight: () => (
-        <Pressable
-          onPress={handleLogout}
-          style={({ pressed }) => [
-            styles.headerLogout,
-            pressed && styles.headerLogoutPressed,
-          ]}
-          hitSlop={12}
-        >
-          <Text style={styles.headerLogoutText}>{t('logOut')}</Text>
-        </Pressable>
-      ),
-    });
-  }, [navigation, handleLogout, t]);
+  const handleSettings = useCallback(() => {
+    setShowAccountMenu(false);
+    Alert.alert(t('cardSettingsTitle'), 'Coming soon.');
+  }, [t]);
+
+  const toggleLanguage = useCallback(() => {
+    void setLocale(locale === 'en' ? 'ko' : 'en');
+  }, [locale, setLocale]);
 
   useFocusEffect(
     useCallback(() => {
@@ -97,87 +76,181 @@ export default function HomeScreen({ navigation }) {
   );
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>{t('homeTitle')}</Text>
-      <Text style={styles.subtitle}>{t('homeSubtitle')}</Text>
-
-      <View style={styles.statsBlock}>
-        <Text style={styles.statsLabel}>{t('sessionTimeHeading')}</Text>
-        <Text style={styles.statsValue}>
-          {t('sessionTimeValue')}:{' '}
-          {formatSessionDuration(totalSessionSeconds)}
-        </Text>
-      </View>
-
-      <Text style={styles.sectionLabel}>{t('languageHeading')}</Text>
-      <View style={styles.langRow}>
-        <Pressable
-          onPress={() => void setLocale('en')}
-          style={({ pressed }) => [
-            styles.langChip,
-            locale === 'en' && styles.langChipSelected,
-            pressed && styles.langChipPressed,
-          ]}
-        >
-          <Text
-            style={[
-              styles.langChipText,
-              locale === 'en' && styles.langChipTextSelected,
-            ]}
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <View style={styles.topBar}>
+        <View style={styles.accountWrap}>
+          <Pressable
+            onPress={() => setShowAccountMenu((v) => !v)}
+            style={({ pressed }) => [styles.accountBtn, pressed && styles.topBtnPressed]}
+            hitSlop={10}
           >
-            {t('langEnglish')}
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => void setLocale('ko')}
-          style={({ pressed }) => [
-            styles.langChip,
-            locale === 'ko' && styles.langChipSelected,
-            pressed && styles.langChipPressed,
-          ]}
-        >
-          <Text
-            style={[
-              styles.langChipText,
-              locale === 'ko' && styles.langChipTextSelected,
-            ]}
-          >
-            {KOREAN_NATIVE_LABEL}
-          </Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.chatPlaceholder}>
-        <Text style={styles.chatText}>{t('chatPlaceholder')}</Text>
-      </View>
-      {cards.map((card) => (
-        <View key={card.title} style={styles.card}>
-          <Text style={styles.cardTitle}>{card.title}</Text>
-          <Text style={styles.cardText}>{card.text}</Text>
+            <Ionicons name="person-circle-outline" size={34} color={ThemeColor.BRAND} />
+          </Pressable>
+          {showAccountMenu && (
+            <View style={styles.accountMenu}>
+              <Pressable
+                onPress={handleSettings}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+              >
+                <Text style={styles.menuItemText}>{t('cardSettingsTitle')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleLogout}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+              >
+                <Text style={styles.menuItemText}>{t('logOut')}</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
-      ))}
-    </ScrollView>
+        <Pressable
+          onPress={toggleLanguage}
+          style={({ pressed }) => [styles.langCornerBtn, pressed && styles.topBtnPressed]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.langCornerText}>
+            {locale === 'en' ? KOREAN_NATIVE_LABEL : 'English'}
+          </Text>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={() => setShowAccountMenu(false)}
+      >
+        <Text style={styles.title}>{t('homeTitle')}</Text>
+        <Text style={styles.subtitle}>{t('homeSubtitle')}</Text>
+
+        <View style={styles.featuredWrap}>
+          <Text style={styles.featuredHeading}>{t('homeTodaysSession')}</Text>
+          <Pressable
+            style={({ pressed }) => [
+              styles.featuredCard,
+              pressed && styles.cardPressed,
+            ]}
+          >
+            <View style={styles.featuredCardInner}>
+              <Text style={styles.featuredLabel}>{sessionLabel(t, todaysSession)}</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <Text style={styles.gridSectionLabel}>{t('homeAllSessions')}</Text>
+        <View style={styles.grid}>
+          {SESSION_ROWS.map((row) => (
+            <View key={row.join('-')} style={styles.gridRow}>
+              {row.map((n) => (
+                <Pressable
+                  key={n}
+                  style={({ pressed }) => [
+                    styles.gridCell,
+                    pressed && styles.cardPressed,
+                  ]}
+                >
+                  <Text style={styles.gridCellNumber}>{n}</Text>
+                  <Text style={styles.gridCellLabel} numberOfLines={1}>
+                    {sessionLabel(t, n)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: ThemeColor.SHADOW_SLATE,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
+
 const styles = StyleSheet.create({
-  headerLogout: {
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    marginRight: 8,
+  safe: {
+    flex: 1,
+    backgroundColor: ThemeColor.SCREEN_BG,
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: ThemeColor.SCREEN_BG,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    paddingBottom: 8,
+    maxWidth: 480,
+    width: '100%',
+    alignSelf: 'center',
+    zIndex: 10,
+  },
+  accountWrap: {
+    position: 'relative',
+  },
+  accountBtn: {
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  headerLogoutPressed: {
-    opacity: 0.55,
+  accountMenu: {
+    position: 'absolute',
+    top: 44,
+    left: 0,
+    minWidth: 150,
+    borderRadius: ThemeRadius.SM,
+    backgroundColor: ThemeColor.WHITE,
+    borderWidth: 1,
+    borderColor: ThemeColor.INPUT_BORDER_SOFT,
+    overflow: 'hidden',
+    ...cardShadow,
   },
-  headerLogoutText: {
-    fontSize: 16,
+  menuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  menuItemPressed: {
+    backgroundColor: 'rgba(31, 60, 136, 0.08)',
+  },
+  menuItemText: {
+    fontSize: 14,
     fontWeight: '600',
+    color: ThemeColor.HOME_CARD_TEXT,
+  },
+  langCornerBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: ThemeRadius.SM,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 99, 235, 0.25)',
+  },
+  langCornerText: {
+    fontSize: 15,
+    fontWeight: '700',
     color: ThemeColor.BRAND,
+  },
+  topBtnPressed: {
+    opacity: 0.82,
   },
   container: {
     padding: 20,
-    backgroundColor: ThemeColor.SCREEN_BG,
+    paddingBottom: 32,
+    maxWidth: 480,
+    width: '100%',
+    alignSelf: 'center',
   },
   title: {
     fontSize: 26,
@@ -188,96 +261,79 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: ThemeColor.HOME_SUBTITLE,
-    marginBottom: 14,
+    marginBottom: 18,
   },
-  statsBlock: {
-    backgroundColor: ThemeColor.WHITE,
-    borderRadius: ThemeRadius.SM,
-    borderLeftWidth: 4,
-    borderLeftColor: ThemeColor.BRAND,
-    padding: 14,
-    marginBottom: 16,
+  featuredWrap: {
+    width: '100%',
+    marginBottom: 20,
   },
-  statsLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: ThemeColor.BRAND,
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  statsValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: ThemeColor.HOME_CARD_TEXT,
-  },
-  sectionLabel: {
+  featuredHeading: {
     fontSize: 14,
     fontWeight: '600',
     color: ThemeColor.HOME_CARD_TEXT,
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  langRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  langChip: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: ThemeRadius.SM,
+  featuredCard: {
+    width: '100%',
+    minHeight: 152,
+    borderRadius: ThemeRadius.MD,
+    backgroundColor: ThemeColor.WHITE,
     borderWidth: 1,
     borderColor: ThemeColor.INPUT_BORDER_SOFT,
-    backgroundColor: ThemeColor.WHITE,
+    overflow: 'hidden',
+    ...cardShadow,
+  },
+  featuredCardInner: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  langChipSelected: {
-    borderColor: ThemeColor.BRAND,
-    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+  featuredLabel: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: ThemeColor.BRAND,
   },
-  langChipPressed: {
-    opacity: 0.85,
-  },
-  langChipText: {
-    fontSize: 15,
+  gridSectionLabel: {
+    fontSize: 14,
     fontWeight: '600',
     color: ThemeColor.HOME_CARD_TEXT,
+    marginBottom: 10,
   },
-  langChipTextSelected: {
-    color: ThemeColor.BRAND,
+  grid: {
+    width: '100%',
+    gap: 10,
   },
-  chatPlaceholder: {
-    height: 180,
-    borderRadius: ThemeRadius.MD,
-    borderWidth: 2,
-    borderColor: ThemeColor.BRAND,
-    borderStyle: 'dashed',
+  gridRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  gridCell: {
+    flex: 1,
+    minHeight: 162,
+    borderRadius: ThemeRadius.SM,
     backgroundColor: ThemeColor.WHITE,
+    borderWidth: 1,
+    borderColor: ThemeColor.INPUT_BORDER_SOFT,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    ...cardShadow,
   },
-  chatText: {
-    color: ThemeColor.HOME_CHAT_MUTED,
-    fontStyle: 'italic',
-  },
-  card: {
-    backgroundColor: ThemeColor.WHITE,
-    borderTopColor: ThemeColor.BRAND,
-    borderTopWidth: 4,
-    borderRadius: ThemeRadius.SM,
-    padding: 16,
-    marginBottom: 12,
-  },
-  cardTitle: {
-    color: ThemeColor.BRAND,
+  gridCellNumber: {
+    fontSize: 26,
     fontWeight: '700',
-    fontSize: 18,
+    color: ThemeColor.BRAND,
     marginBottom: 4,
   },
-  cardText: {
+  gridCellLabel: {
+    fontSize: 13,
+    fontWeight: '600',
     color: ThemeColor.HOME_CARD_TEXT,
-    lineHeight: 20,
+    textAlign: 'center',
+  },
+  cardPressed: {
+    opacity: 0.9,
   },
 });

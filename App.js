@@ -25,7 +25,11 @@ export default function App() {
               component={SignUpScreen}
               options={{ headerShown: false }}
             />
-            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen
+              name="Home"
+              component={HomeScreen}
+              options={{ headerShown: false }}
+            />
           </Stack.Navigator>
         </NavigationContainer>
         <SessionTracker />

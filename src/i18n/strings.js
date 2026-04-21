@@ -19,6 +19,9 @@ export const STRINGS = {
     emailInUse: 'That email address is already in use.',
     homeTitle: 'Mindfulness Assistant',
     homeSubtitle: 'Mindfulness Virtual Assistant',
+    homeTodaysSession: "Today's session",
+    homeAllSessions: 'All sessions',
+    homeSession: 'Session',
     chatPlaceholder: '[ AI chatbot UI placeholder ]',
     cardAboutTitle: 'About the Assistant',
     cardAboutText:
@@ -62,6 +65,9 @@ export const STRINGS = {
     emailInUse: '이미 사용 중인 이메일입니다.',
     homeTitle: '마음챙김 도우미',
     homeSubtitle: '마음챙김 가상 도우미',
+    homeTodaysSession: '오늘의 세션',
+    homeAllSessions: '전체 세션',
+    homeSession: '세션',
     chatPlaceholder: '[ AI 챗봇 UI 자리 ]',
     cardAboutTitle: '어시스턴트 소개',
     cardAboutText:

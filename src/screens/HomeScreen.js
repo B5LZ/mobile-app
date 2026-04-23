@@ -78,6 +78,14 @@ export default function HomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.topBar}>
+        {showAccountMenu && (
+          <Pressable
+            style={styles.topBarDismissLayer}
+            onPress={() => setShowAccountMenu(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close account menu"
+          />
+        )}
         <View style={styles.accountWrap}>
           <Pressable
             onPress={() => setShowAccountMenu((v) => !v)}
@@ -105,6 +113,7 @@ export default function HomeScreen({ navigation }) {
         </View>
         <Pressable
           onPress={toggleLanguage}
+          disabled={showAccountMenu}
           style={({ pressed }) => [styles.langCornerBtn, pressed && styles.topBtnPressed]}
           accessibilityRole="button"
         >
@@ -113,20 +122,15 @@ export default function HomeScreen({ navigation }) {
           </Text>
         </Pressable>
       </View>
-      {showAccountMenu && (
-        <Pressable
-          style={styles.menuBackdrop}
-          onPress={() => setShowAccountMenu(false)}
-          accessibilityRole="button"
-          accessibilityLabel="Close account menu"
-        />
-      )}
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator
         keyboardShouldPersistTaps="handled"
+        onTouchStart={() => {
+          if (showAccountMenu) setShowAccountMenu(false);
+        }}
         onScrollBeginDrag={() => setShowAccountMenu(false)}
       >
         <Text style={styles.title}>{t('homeTitle')}</Text>
@@ -206,6 +210,7 @@ const styles = StyleSheet.create({
   },
   accountWrap: {
     position: 'relative',
+    zIndex: 60,
   },
   accountBtn: {
     minWidth: 40,
@@ -223,12 +228,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: ThemeColor.INPUT_BORDER_SOFT,
     overflow: 'hidden',
-    zIndex: 40,
+    zIndex: 70,
     ...cardShadow,
   },
-  menuBackdrop: {
+  topBarDismissLayer: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 20,
+    zIndex: 40,
   },
   menuItem: {
     paddingHorizontal: 12,
@@ -243,6 +248,7 @@ const styles = StyleSheet.create({
     color: ThemeColor.HOME_CARD_TEXT,
   },
   langCornerBtn: {
+    zIndex: 30,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: ThemeRadius.SM,

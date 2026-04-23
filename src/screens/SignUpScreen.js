@@ -205,7 +205,7 @@ export default function SignUpScreen({ navigation }) {
                     !dob && { color: ThemeColor.PLACEHOLDER },
                   ]}
                 >
-                  {dob || copy.dateOfBirth ?? 'Date of birth'}
+                  {dob || (copy.dateOfBirth ?? 'Date of birth')}
                 </Text>
                 <Ionicons
                   name="chevron-down"

@@ -1,5 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   Alert,
   BackHandler,
@@ -68,6 +68,12 @@ export default function HomeScreen({ navigation }) {
     void setLocale(locale === 'en' ? 'ko' : 'en');
   }, [locale, setLocale]);
 
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      gestureEnabled: false,
+    });
+  }, [navigation]);
+
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
@@ -76,7 +82,7 @@ export default function HomeScreen({ navigation }) {
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
         {showAccountMenu && (
           <Pressable
@@ -134,7 +140,6 @@ export default function HomeScreen({ navigation }) {
         onScrollBeginDrag={() => setShowAccountMenu(false)}
       >
         <Text style={styles.title}>{t('homeTitle')}</Text>
-        <Text style={styles.subtitle}>{t('homeSubtitle')}</Text>
 
         <View style={styles.featuredWrap}>
           <Text style={styles.featuredHeading}>{t('homeTodaysSession')}</Text>

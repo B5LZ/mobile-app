@@ -4,9 +4,10 @@ The project is built using JS and React Native.
 
 # Setting Up
 - Once you clone the repository, you must create a .env locally at the root level and place the Firebase keys in there to use the database.
+- To get the environment variables, contact the development team.
 
 # Starting the code 
-- npm install
+- npm install  (this must be run again after any changes are made to the repo).
 - **npm start** — tunnel mode (default for the team; reliable Expo Go on Mac when LAN is blocked)
 - **npm run start:lan** — same Wi‑Fi as your phone; use this if tunnel fails (e.g. ngrok `reading 'body'` on Windows) or you prefer LAN
 - `npm run start:tunnel` — same as `npm start`

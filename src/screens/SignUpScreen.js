@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -7,7 +7,8 @@ import {
   View,
   Alert,
   Platform,
-  ScrollView,
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,8 @@ export default function SignUpScreen({ navigation }) {
   const [dob, setDob] = useState('');
   const [dobDate, setDobDate] = useState(new Date(2000, 0, 1));
   const [showPicker, setShowPicker] = useState(false);
+  // Tracks a pending date on Android before the user confirms
+  const [pendingDate, setPendingDate] = useState(new Date(2000, 0, 1));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,13 +46,42 @@ export default function SignUpScreen({ navigation }) {
 
   const copy = STRINGS[languagePreference];
 
+  useLayoutEffect(() => {
+    const c = STRINGS[languagePreference];
+    navigation.setOptions({
+      title: c.signUpHeader,
+      headerBackTitle: c.signInButton,
+    });
+  }, [navigation, languagePreference]);
+
   const setLanguage = (/** @type {'en' | 'ko'} */ code) => {
     setLanguagePreference(code);
     hydrateLocale(code);
   };
 
-  const onDateChange = (event, selectedDate) => {
-    if (Platform.OS === 'android') setShowPicker(false);
+  // ─── Date change handlers ──────────────────────────────────────────────────
+
+  /**
+   * iOS: every scroll fires this. We commit immediately because the
+   * inline spinner always shows a "Done" button to close.
+   */
+  const onDateChangeIOS = (event, selectedDate) => {
+    if (event.type === 'dismissed') {
+      setShowPicker(false);
+      return;
+    }
+    if (selectedDate) {
+      setDobDate(selectedDate);
+      setDob(formatDate(selectedDate));
+    }
+  };
+
+  /**
+   * Android: the system dialog fires one event when the user taps OK or
+   * Cancel. We commit the date only on 'set'; on 'dismissed' we discard.
+   */
+  const onDateChangeAndroid = (event, selectedDate) => {
+    setShowPicker(false); // always close the dialog
     if (event.type === 'dismissed') return;
     if (selectedDate) {
       setDobDate(selectedDate);
@@ -57,17 +89,17 @@ export default function SignUpScreen({ navigation }) {
     }
   };
 
+  // ─── Sign-up logic ─────────────────────────────────────────────────────────
+
   const handleSignUp = async () => {
     if (!name || !dob || !email || !password || !confirmPassword) {
       Alert.alert(copy.errorTitle, copy.errorFillAll);
       return;
     }
-
     if (password !== confirmPassword) {
       Alert.alert(copy.errorTitle, 'Passwords do not match. Please try again.');
       return;
     }
-
     if (password.length < 8) {
       Alert.alert(copy.errorTitle, 'Password should be at least 8 characters long.');
       return;
@@ -101,6 +133,8 @@ export default function SignUpScreen({ navigation }) {
     }
   };
 
+  // ─── Render ────────────────────────────────────────────────────────────────
+
   return (
     <LinearGradient
       colors={[...ThemeGradient.SIGN_IN_BACKDROP]}
@@ -108,18 +142,12 @@ export default function SignUpScreen({ navigation }) {
       style={styles.screenGradient}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.topBar}>
+        {/* Language toggle (top-right corner) */}
+        <View style={styles.langCorner}>
           <Pressable
-            onPress={() => navigation.goBack()}
-            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            hitSlop={12}
-          >
-            <Ionicons name="chevron-back" size={28} color={ThemeColor.BRAND} />
-          </Pressable>
-          <Pressable
-            onPress={() => setLanguage(languagePreference === 'en' ? 'ko' : 'en')}
+            onPress={() =>
+              setLanguage(languagePreference === 'en' ? 'ko' : 'en')
+            }
             style={({ pressed }) => [
               styles.langCornerBtn,
               pressed && styles.langCornerBtnPressed,
@@ -133,21 +161,21 @@ export default function SignUpScreen({ navigation }) {
         </View>
 
         <View style={styles.layout}>
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.content}>
+          <View style={styles.content}>
             <Text style={styles.title}>{copy.createAccountTitle}</Text>
-            <Text style={styles.subtitle}>{copy.signInSubtitle ?? 'Join your mindfulness journey'}</Text>
+            <Text style={styles.subtitle}>
+              {copy.signInSubtitle ?? 'Join your mindfulness journey'}
+            </Text>
 
             <View style={styles.fieldGroup}>
-
               {/* Full Name */}
               <View style={styles.inputShell}>
-                <Ionicons name="person-outline" size={20} color={ThemeColor.TEXT_MUTED} style={styles.inputIcon} />
+                <Ionicons
+                  name="person-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   value={name}
                   onChangeText={setName}
@@ -158,52 +186,99 @@ export default function SignUpScreen({ navigation }) {
                 />
               </View>
 
-              {/* Date of Birth — tappable field */}
+              {/* Date of Birth — tappable field, works on all platforms */}
               <Pressable
                 onPress={() => setShowPicker(true)}
                 style={styles.inputShell}
+                accessibilityRole="button"
+                accessibilityLabel={dob || 'Select date of birth'}
               >
-                <Ionicons name="calendar-outline" size={20} color={ThemeColor.TEXT_MUTED} style={styles.inputIcon} />
-                <Text style={[styles.inputInner, !dob && { color: ThemeColor.PLACEHOLDER }]}>
-                  {dob || 'Date of birth'}
+                <Ionicons
+                  name="calendar-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
+                <Text
+                  style={[
+                    styles.inputInner,
+                    !dob && { color: ThemeColor.PLACEHOLDER },
+                  ]}
+                >
+                  {dob || (copy.dateOfBirth ?? 'Date of birth')}
                 </Text>
-                <Ionicons name="chevron-down" size={16} color={ThemeColor.TEXT_MUTED} />
+                <Ionicons
+                  name="chevron-down"
+                  size={16}
+                  color={ThemeColor.TEXT_MUTED}
+                />
               </Pressable>
 
-              {/* iOS: inline spinner picker */}
-              {showPicker && Platform.OS === 'ios' && (
-                <View style={styles.iosPickerWrapper}>
-                  <DateTimePicker
-                    value={dobDate}
-                    mode="date"
-                    display="spinner"
-                    maximumDate={new Date()}
-                    onChange={onDateChange}
-                    style={styles.iosPicker}
-                  />
-                  <Pressable
-                    onPress={() => setShowPicker(false)}
-                    style={styles.iosPickerDone}
-                  >
-                    <Text style={styles.iosPickerDoneText}>Done</Text>
-                  </Pressable>
-                </View>
+              {/*
+               * iOS — rendered inside a Modal so it floats above the keyboard
+               * and any ScrollView. The spinner fires onChange on every scroll
+               * so the date is always up-to-date when the user taps Done.
+               */}
+              {Platform.OS === 'ios' && (
+                <Modal
+                  visible={showPicker}
+                  transparent
+                  animationType="slide"
+                  onRequestClose={() => setShowPicker(false)}
+                >
+                  <TouchableWithoutFeedback onPress={() => setShowPicker(false)}>
+                    <View style={styles.modalBackdrop} />
+                  </TouchableWithoutFeedback>
+                  <View style={styles.iosPickerSheet}>
+                    <View style={styles.iosPickerHandle} />
+                    <View style={styles.iosPickerToolbar}>
+                      <Text style={styles.iosPickerTitle}>
+                        {copy.dateOfBirth ?? 'Date of birth'}
+                      </Text>
+                      <Pressable
+                        onPress={() => setShowPicker(false)}
+                        hitSlop={12}
+                      >
+                        <Text style={styles.iosPickerDoneText}>
+                          {copy.done ?? 'Done'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <DateTimePicker
+                      value={dobDate}
+                      mode="date"
+                      display="spinner"
+                      maximumDate={new Date()}
+                      onChange={onDateChangeIOS}
+                      style={styles.iosPicker}
+                    />
+                  </View>
+                </Modal>
               )}
 
-              {/* Android: system date picker dialog */}
-              {showPicker && Platform.OS === 'android' && (
+              {/*
+               * Android — @react-native-community/datetimepicker renders the
+               * native system dialog when mounted; we unmount it after the
+               * user confirms or cancels (handled in onDateChangeAndroid).
+               */}
+              {Platform.OS === 'android' && showPicker && (
                 <DateTimePicker
                   value={dobDate}
                   mode="date"
-                  display="default"
+                  display="default"      // native calendar dialog
                   maximumDate={new Date()}
-                  onChange={onDateChange}
+                  onChange={onDateChangeAndroid}
                 />
               )}
 
               {/* Email */}
               <View style={styles.inputShell}>
-                <Ionicons name="mail-outline" size={20} color={ThemeColor.TEXT_MUTED} style={styles.inputIcon} />
+                <Ionicons
+                  name="mail-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   value={email}
                   onChangeText={setEmail}
@@ -218,7 +293,12 @@ export default function SignUpScreen({ navigation }) {
 
               {/* Password */}
               <View style={styles.inputShell}>
-                <Ionicons name="lock-closed-outline" size={20} color={ThemeColor.TEXT_MUTED} style={styles.inputIcon} />
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   value={password}
                   onChangeText={setPassword}
@@ -231,11 +311,16 @@ export default function SignUpScreen({ navigation }) {
 
               {/* Confirm Password */}
               <View style={styles.inputShell}>
-                <Ionicons name="lock-closed-outline" size={20} color={ThemeColor.TEXT_MUTED} style={styles.inputIcon} />
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  placeholder="Confirm password"
+                  placeholder={copy.confirmPassword ?? 'Confirm password'}
                   placeholderTextColor={ThemeColor.PLACEHOLDER}
                   secureTextEntry
                   style={styles.inputInner}
@@ -254,7 +339,12 @@ export default function SignUpScreen({ navigation }) {
                   pressed && styles.langChipPressed,
                 ]}
               >
-                <Text style={[styles.langChipText, languagePreference === 'en' && styles.langChipTextSelected]}>
+                <Text
+                  style={[
+                    styles.langChipText,
+                    languagePreference === 'en' && styles.langChipTextSelected,
+                  ]}
+                >
                   {copy.langEnglish}
                 </Text>
               </Pressable>
@@ -266,7 +356,12 @@ export default function SignUpScreen({ navigation }) {
                   pressed && styles.langChipPressed,
                 ]}
               >
-                <Text style={[styles.langChipText, languagePreference === 'ko' && styles.langChipTextSelected]}>
+                <Text
+                  style={[
+                    styles.langChipText,
+                    languagePreference === 'ko' && styles.langChipTextSelected,
+                  ]}
+                >
                   {KOREAN_NATIVE_LABEL}
                 </Text>
               </Pressable>
@@ -288,25 +383,38 @@ export default function SignUpScreen({ navigation }) {
                   style={styles.buttonGradient}
                 >
                   <View style={styles.buttonInner}>
-                    <Text style={styles.primaryButtonText}>{copy.createAccountButton}</Text>
+                    <Text style={styles.primaryButtonText}>
+                      {copy.createAccountButton}
+                    </Text>
                     <View style={styles.buttonChevron}>
-                      <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.95)" />
+                      <Ionicons
+                        name="chevron-forward"
+                        size={22}
+                        color="rgba(255,255,255,0.95)"
+                      />
                     </View>
                   </View>
                 </LinearGradient>
               </Pressable>
             </View>
 
-            {/* Sign in link */}
+            {/* Sign-in link */}
             <Pressable
               onPress={() => navigation.goBack()}
-              style={({ pressed }) => [styles.signInRow, pressed && styles.signInPressed]}
+              style={({ pressed }) => [
+                styles.signInRow,
+                pressed && styles.signInPressed,
+              ]}
             >
-              <Ionicons name="log-in-outline" size={18} color={ThemeColor.BRAND} style={styles.signInIcon} />
+              <Ionicons
+                name="log-in-outline"
+                size={18}
+                color={ThemeColor.BRAND}
+                style={styles.signInIcon}
+              />
               <Text style={styles.link}>{copy.alreadyHaveAccount}</Text>
             </Pressable>
-            </View>
-          </ScrollView>
+          </View>
         </View>
       </SafeAreaView>
     </LinearGradient>
@@ -316,24 +424,17 @@ export default function SignUpScreen({ navigation }) {
 const styles = StyleSheet.create({
   screenGradient: { flex: 1 },
   safe: { flex: 1 },
-  topBar: {
+
+  langCorner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
     paddingTop: 2,
-    paddingBottom: 8,
+    paddingBottom: 4,
     maxWidth: 440,
     width: '100%',
     alignSelf: 'center',
   },
-  backBtn: {
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  backBtnPressed: { opacity: 0.7 },
   langCornerBtn: {
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -344,14 +445,16 @@ const styles = StyleSheet.create({
   },
   langCornerBtnPressed: { opacity: 0.82 },
   langCornerText: { fontSize: 15, fontWeight: '700', color: ThemeColor.BRAND },
+
   layout: { flex: 1, maxWidth: 440, width: '100%', alignSelf: 'center' },
-  scroll: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: 24 },
   content: {
+    flex: 1,
     paddingHorizontal: 28,
     paddingTop: 8,
-    paddingBottom: 8,
+    paddingBottom: 16,
+    justifyContent: 'flex-start',
   },
+
   title: {
     fontSize: 28,
     fontWeight: '700',
@@ -366,6 +469,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 24,
   },
+
   fieldGroup: { marginBottom: 8 },
   inputShell: {
     flexDirection: 'row',
@@ -386,29 +490,55 @@ const styles = StyleSheet.create({
     color: ThemeColor.TEXT_PRIMARY,
     fontWeight: '400',
   },
-  iosPickerWrapper: {
-    backgroundColor: ThemeColor.INPUT_BG,
-    borderWidth: 1,
-    borderColor: ThemeColor.INPUT_BORDER,
-    borderRadius: ThemeRadius.SM,
-    marginBottom: 14,
-    overflow: 'hidden',
+
+  // ── iOS bottom-sheet picker ──────────────────────────────────────────────
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  iosPickerSheet: {
+    backgroundColor: ThemeColor.INPUT_BG ?? '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 28,
+    // subtle shadow on top edge
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+  },
+  iosPickerHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D1D5DB',
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  iosPickerToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: ThemeColor.INPUT_BORDER ?? '#E5E7EB',
+  },
+  iosPickerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ThemeColor.TEXT_PRIMARY ?? '#111',
+  },
+  iosPickerDoneText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: ThemeColor.BRAND,
   },
   iosPicker: {
     width: '100%',
   },
-  iosPickerDone: {
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: ThemeColor.INPUT_BORDER,
-  },
-  iosPickerDoneText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: ThemeColor.BRAND,
-  },
+
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',
@@ -416,6 +546,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 4,
   },
+
   langRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   langChip: {
     flex: 1,
@@ -433,6 +564,7 @@ const styles = StyleSheet.create({
   langChipPressed: { opacity: 0.85 },
   langChipText: { fontSize: 15, fontWeight: '600', color: ThemeColor.TEXT_MUTED },
   langChipTextSelected: { color: ThemeColor.BRAND },
+
   buttonShadow: {
     marginBottom: 20,
     borderRadius: ThemeRadius.SM,
@@ -457,9 +589,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     position: 'relative',
   },
-  primaryButtonText: { color: ThemeColor.WHITE, fontWeight: '600', fontSize: 16, letterSpacing: 0.2 },
+  primaryButtonText: {
+    color: ThemeColor.WHITE,
+    fontWeight: '600',
+    fontSize: 16,
+    letterSpacing: 0.2,
+  },
   buttonChevron: { position: 'absolute', right: 16 },
-  signInRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
+
+  signInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
   signInIcon: { marginRight: 8 },
   signInPressed: { opacity: 0.65 },
   link: { color: ThemeColor.BRAND, fontWeight: '600', fontSize: 15 },

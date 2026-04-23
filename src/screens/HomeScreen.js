@@ -113,6 +113,14 @@ export default function HomeScreen({ navigation }) {
           </Text>
         </Pressable>
       </View>
+      {showAccountMenu && (
+        <Pressable
+          style={styles.menuBackdrop}
+          onPress={() => setShowAccountMenu(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Close account menu"
+        />
+      )}
 
       <ScrollView
         style={styles.scroll}
@@ -194,7 +202,7 @@ const styles = StyleSheet.create({
     maxWidth: 480,
     width: '100%',
     alignSelf: 'center',
-    zIndex: 10,
+    zIndex: 30,
   },
   accountWrap: {
     position: 'relative',
@@ -215,7 +223,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: ThemeColor.INPUT_BORDER_SOFT,
     overflow: 'hidden',
+    zIndex: 40,
     ...cardShadow,
+  },
+  menuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
   },
   menuItem: {
     paddingHorizontal: 12,

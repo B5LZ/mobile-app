@@ -247,6 +247,64 @@ export default function SignUpScreen({ navigation }) {
                * and any ScrollView. The spinner fires onChange on every scroll
                * so the date is always up-to-date when the user taps Done.
                */}
+          {Platform.OS === 'web' ? (
+            <View style={styles.inputShell}>
+              <Ionicons
+                name="calendar-outline"
+                size={20}
+                color={ThemeColor.TEXT_MUTED}
+                style={styles.inputIcon}
+              />
+
+              <input
+                type="date"
+                value={dobDate.toISOString().split('T')[0]}
+                onChange={(e) => {
+                  const selectedDate = new Date(e.target.value);
+                  setDobDate(selectedDate);
+                  setDob(formatDate(selectedDate, languagePreference));
+                }}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: 16,
+                  backgroundColor: 'transparent',
+                  color: ThemeColor.TEXT_PRIMARY,
+                }}
+              />
+            </View>
+          ) : (
+            <>
+              <Pressable
+                onPress={() => setShowPicker(true)}
+                style={styles.inputShell}
+                accessibilityRole="button"
+                accessibilityLabel={dob || 'Select date of birth'}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
+
+                <Text
+                  style={[
+                    styles.inputInner,
+                    !dob && { color: ThemeColor.PLACEHOLDER },
+                  ]}
+                >
+                  {dob || (copy.dateOfBirth ?? 'Date of birth')}
+                </Text>
+
+                <Ionicons
+                  name="chevron-down"
+                  size={16}
+                  color={ThemeColor.TEXT_MUTED}
+                />
+              </Pressable>
+
               {Platform.OS === 'ios' && (
                 <Modal
                   visible={showPicker}

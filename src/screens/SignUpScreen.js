@@ -31,7 +31,8 @@ function formatDate(date) {
 
 export default function SignUpScreen({ navigation }) {
   const { hydrateLocale, locale } = useLanguage();
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState('');
   const [dobDate, setDobDate] = useState(new Date(2000, 0, 1));
   const [showPicker, setShowPicker] = useState(false);
@@ -92,7 +93,7 @@ export default function SignUpScreen({ navigation }) {
   // ─── Sign-up logic ─────────────────────────────────────────────────────────
 
   const handleSignUp = async () => {
-    if (!name || !dob || !email || !password || !confirmPassword) {
+    if (!firstName || !lastName || !dob || !email || !password || !confirmPassword) {
       Alert.alert(copy.errorTitle, copy.errorFillAll);
       return;
     }
@@ -114,7 +115,9 @@ export default function SignUpScreen({ navigation }) {
       const user = userCredential.user;
 
       await setDoc(doc(db, 'users', user.uid), {
-        fullName: name,
+        firstName,
+        lastName,
+        fullName: `${firstName} ${lastName}`,
         email,
         dateOfBirth: dob,
         languagePreference,
@@ -168,7 +171,7 @@ export default function SignUpScreen({ navigation }) {
             </Text>
 
             <View style={styles.fieldGroup}>
-              {/* Full Name */}
+              {/* First Name */}
               <View style={styles.inputShell}>
                 <Ionicons
                   name="person-outline"
@@ -177,9 +180,27 @@ export default function SignUpScreen({ navigation }) {
                   style={styles.inputIcon}
                 />
                 <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder={copy.fullName}
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  placeholder={copy.firstName ?? 'First Name'}
+                  placeholderTextColor={ThemeColor.PLACEHOLDER}
+                  autoCapitalize="words"
+                  style={styles.inputInner}
+                />
+              </View>
+
+              {/* Last Name */}
+              <View style={styles.inputShell}>
+                <Ionicons
+                  name="person-outline"
+                  size={20}
+                  color={ThemeColor.TEXT_MUTED}
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  value={lastName}
+                  onChangeText={setLastName}
+                  placeholder={copy.lastName ?? 'Last Name'}
                   placeholderTextColor={ThemeColor.PLACEHOLDER}
                   autoCapitalize="words"
                   style={styles.inputInner}

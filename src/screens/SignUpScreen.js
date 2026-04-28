@@ -22,7 +22,14 @@ import { STRINGS } from '../i18n/strings';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
-function formatDate(date) {
+function formatDate(date, language) {
+  if (language === 'ko') {
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+    const d = date.getDate();
+    return `${y}년 ${m}월 ${d}일`;
+  }
+
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
@@ -73,7 +80,7 @@ export default function SignUpScreen({ navigation }) {
     }
     if (selectedDate) {
       setDobDate(selectedDate);
-      setDob(formatDate(selectedDate));
+      setDob(formatDate(selectedDate, languagePreference));
     }
   };
 
@@ -86,7 +93,7 @@ export default function SignUpScreen({ navigation }) {
     if (event.type === 'dismissed') return;
     if (selectedDate) {
       setDobDate(selectedDate);
-      setDob(formatDate(selectedDate));
+      setDob(formatDate(selectedDate, languagePreference));
     }
   };
 

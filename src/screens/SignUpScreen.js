@@ -272,6 +272,7 @@ export default function SignUpScreen({ navigation }) {
                       maximumDate={new Date()}
                       onChange={onDateChangeIOS}
                       themeVariant="light"
+                      locale={languagePreference === 'ko' ? 'ko-KR' : 'en-US'}
                     />
                   </View>
                 </Modal>

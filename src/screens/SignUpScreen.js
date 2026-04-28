@@ -250,7 +250,7 @@ export default function SignUpScreen({ navigation }) {
                       display="spinner"
                       maximumDate={new Date()}
                       onChange={onDateChangeIOS}
-                      style={styles.iosPicker}
+                      themeVariant="light"
                     />
                   </View>
                 </Modal>

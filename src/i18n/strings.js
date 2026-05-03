@@ -12,16 +12,20 @@ export const STRINGS = {
     password: 'Password',
     confirmPassword: 'Confirm Password',
     dateOfBirth: 'Date of Birth',
+    
     languageLabel: 'Language preference',
     langEnglish: 'English',
     langKorean: 'Korean',
+    
     createAccountButton: 'Create Account',
     alreadyHaveAccount: 'Already have an account? Sign in',
+    
     errorTitle: 'Error',
     errorFillAll: 'Please fill in all fields.',
     signUpFailed: 'Sign Up Failed',
     emailInUse: 'That email address is already in use.',
-    homeTitle: 'Mindfulness Assistant',
+    
+    homeTitle: 'Hi, {name}!',
     homeSubtitle: 'Mindfulness Virtual Assistant',
     homeTodaysSession: "Today's session",
     homeAllSessions: 'All sessions',
@@ -41,6 +45,12 @@ export const STRINGS = {
     sessionTimeHeading: 'Your time',
     sessionTimeValue: 'Total session time',
     logOut: 'Log out',
+
+    homeTab: 'Home',
+    myStatsTab: 'My Stats',
+    profileTab: 'Profile',
+
+    
     signInWelcome: 'Welcome',
     signInSubtitle: 'Sign in to continue',
     signInButton: 'Sign In',
@@ -48,10 +58,17 @@ export const STRINGS = {
     signInFailedTitle: 'Sign In Failed',
     signInFailedBody:
       'Invalid email or password. Please try again.',
+    
     signUpPrompt: 'Need an account? Sign up',
     signInFooter:
       'Internal preview — University of Massachusetts Boston. Not for public distribution.',
-  },
+    
+    profileTitle: 'Profile',
+    personalInformation: 'Personal Information',
+    settings: 'Settings',
+    support: 'Support',
+    },
+    
   ko: {
     signUpHeader: '계정 만들기',
     createAccountTitle: '계정 만들기',
@@ -66,12 +83,14 @@ export const STRINGS = {
     langEnglish: 'English',
     langKorean: '한국어',
     createAccountButton: '계정 만들기',
+    
     alreadyHaveAccount: '이미 계정이 있으신가요? 로그인',
     errorTitle: '오류',
     errorFillAll: '모든 항목을 입력해 주세요.',
     signUpFailed: '가입 실패',
     emailInUse: '이미 사용 중인 이메일입니다.',
-    homeTitle: '마음챙김 도우미',
+    
+    homeTitle: '안녕하세요, {name} 님!',
     homeSubtitle: '마음챙김 가상 도우미',
     homeTodaysSession: '오늘의 세션',
     homeAllSessions: '전체 세션',
@@ -86,10 +105,12 @@ export const STRINGS = {
     cardUpdatesText: '한국어 지원이 최근에 개선되었습니다.',
     cardSettingsTitle: '빠른 설정',
     cardSettingsText: '화면 및 접근성 옵션을 여기에서 조정할 수 있습니다.',
+    
     languageHeading: '언어',
     sessionTimeHeading: '이용 시간',
     sessionTimeValue: '총 세션 시간',
     logOut: '로그아웃',
+    
     signInWelcome: '환영합니다',
     signInSubtitle: '계속하려면 로그인하세요',
     signInButton: '로그인',
@@ -97,8 +118,18 @@ export const STRINGS = {
     signInFailedTitle: '로그인 실패',
     signInFailedBody:
       '이메일 또는 비밀번호가 올바르지 않습니다. 다시 시도해 주세요.',
+    
     signUpPrompt: '계정이 없으신가요? 가입하기',
     signInFooter:
       '내부 프리뷰 버전 - UMass Boston. 외부 배포 금지.',
+
+    profileTitle: '프로필',
+    personalInformation: '개인 정보',
+    settings: '설정',
+    support: '지원하다',
+
+    homeTab: '홈',
+    myStatsTab: '내 통계',
+    profileTab: '프로필',
   },
 };

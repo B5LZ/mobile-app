@@ -22,6 +22,9 @@ const SESSION_COUNT = 12;
 const GRID_COLS = 2;
 const GRID_ROWS = Math.ceil(SESSION_COUNT / GRID_COLS);
 
+/*to get user's name*/
+
+
 /** 1–12 distributed across 6 rows of 2. */
 const SESSION_ROWS = Array.from({ length: GRID_ROWS }, (_, r) => {
   const start = r * GRID_COLS;
@@ -42,6 +45,8 @@ function sessionLabel(t, n) {
 }
 
 export default function HomeScreen({ navigation }) {
+  const user = auth.currentUser;
+  const name = user?.displayName || 'User';  
   const { locale, setLocale, t } = useLanguage();
   const [showAccountMenu, setShowAccountMenu] = useState(false);
 
@@ -92,31 +97,10 @@ export default function HomeScreen({ navigation }) {
             accessibilityLabel="Close account menu"
           />
         )}
-        <View style={styles.accountWrap}>
-          <Pressable
-            onPress={() => setShowAccountMenu((v) => !v)}
-            style={({ pressed }) => [styles.accountBtn, pressed && styles.topBtnPressed]}
-            hitSlop={10}
-          >
-            <Ionicons name="person-circle-outline" size={34} color={ThemeColor.BRAND} />
-          </Pressable>
-          {showAccountMenu && (
-            <View style={styles.accountMenu}>
-              <Pressable
-                onPress={handleSettings}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-              >
-                <Text style={styles.menuItemText}>{t('cardSettingsTitle')}</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleLogout}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-              >
-                <Text style={styles.menuItemText}>{t('logOut')}</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
+        
+
+
+
         <Pressable
           onPress={toggleLanguage}
           disabled={showAccountMenu}
@@ -139,7 +123,9 @@ export default function HomeScreen({ navigation }) {
         }}
         onScrollBeginDrag={() => setShowAccountMenu(false)}
       >
-        <Text style={styles.title}>{t('homeTitle')}</Text>
+        <Text style={styles.title}>
+          {t('homeTitle').replace('{name}', name)}
+        </Text>
 
         <View style={styles.featuredWrap}>
           <Text style={styles.featuredHeading}>{t('homeTodaysSession')}</Text>

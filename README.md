@@ -1,55 +1,65 @@
-# mobile-app
-This repository contains our code for our mobile version of the Multi-Language Wellness App.
-The project is built using JS and React Native.
+# Multilingual Virtual Assistant Mindfulness
 
-# Setting Up
-- Once you clone the repository, you must create a .env locally at the root level and place the Firebase keys in there to use the database.
-- To get the environment variables, contact the development team.
+This repository combines the mindfulness web/avatar chatbot, backend services, and the mobile version of the Multi-Language Wellness App.
 
-# Starting the code 
-- npm install  (this must be run again after any changes are made to the repo).
-- **npm start** — tunnel mode (default for the team; reliable Expo Go on Mac when LAN is blocked)
-- **npm run start:lan** — same Wi‑Fi as your phone; use this if tunnel fails (e.g. ngrok `reading 'body'` on Windows) or you prefer LAN
-- `npm run start:tunnel` — same as `npm start`
+## Projects
 
-# Viewing the app on mobile
-1) Download Expo Go on your mobile device
-2) If you are on IOS, scan the QR that is produced in the terminal after running npm start, and it should open in your Expo Go app.
-3) Wait for the app to load and you will see our work.
+- `Web_Mindfulness_Chatbot/` contains the browser-based mindfulness chatbot and avatar experience.
+- `Mobile_Mindfulness_React/` contains the earlier mobile mindfulness React project.
+- The repository root now also contains the merged Expo mobile app from `mobile-app`.
+- `server.py`, `chatbot.py`, `requirements.txt`, and `render.yaml` support the Python backend/deployment flow.
 
-# Mac developers (Expo + `simctl` / Xcode)
-**Easiest path — no Xcode required:** use **Expo Go on a real iPhone** and scan the QR code from the dev server. You do **not** need the iOS Simulator for day‑to‑day work.
+## Mobile App Setup
 
-If you see **`unable to run simctl` / `xcrun simctl` failed** when starting Expo:
-- That command is only needed for the **iOS Simulator**. If you are testing on a **physical device with Expo Go**, you can **ignore the warning** as long as Metro starts and the QR code appears.
-- Do **not** press **`i`** in the terminal (that tries to open the Simulator). Use the QR code + Expo Go instead.
+The merged mobile app is built with JavaScript, React Native, and Expo.
 
-**Only if you want the iOS Simulator:** install **Xcode** from the App Store, open it once, install an **iOS Simulator** runtime (Xcode → Settings → Platforms), then in Terminal run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` and `sudo xcodebuild -license accept`. Confirm with `xcrun simctl help` before relying on **`i`** in Expo.
+1. Create a local `.env` file at the repository root.
+2. Add the Firebase keys required by `src/config/firebaseConfig.js`.
+3. Install dependencies:
 
-# Mac: Expo Go stuck on “Taking longer than expected” / won’t load
-That means the **phone cannot reach the dev server** on your Mac (LAN QR uses your Wi‑Fi IP and port `8081`). Windows/Linux can work while Mac fails if **the Mac firewall** or **network path** blocks that traffic—it is not because they pressed **`i`**.
+```bash
+npm install
+```
 
-**Try this first (works for most teams): tunnel mode** (serves the bundle over the internet so the phone does not need local LAN access):
+4. Start Expo:
+
+```bash
+npm start
+```
+
+`npm start` uses tunnel mode by default for reliable Expo Go testing when LAN access is blocked.
+
+Other mobile start commands:
+
+```bash
+npm run start:lan
+npm run start:tunnel
+```
+
+## Viewing The App On Mobile
+
+1. Install Expo Go on your mobile device.
+2. Start the app with `npm start`.
+3. Scan the QR code shown in the terminal.
+4. Wait for Expo Go to load the app.
+
+## Mac Developers
+
+The easiest path is to use Expo Go on a real iPhone and scan the QR code from the dev server. Xcode is not required for normal device testing.
+
+If you see an `unable to run simctl` or `xcrun simctl failed` warning while using a physical device, you can ignore it as long as Metro starts and the QR code appears. Avoid pressing `i` unless you intend to use the iOS Simulator.
+
+Only install and configure Xcode if you want to run the app in the iOS Simulator.
+
+## Expo Go Loading Issues On Mac
+
+If Expo Go gets stuck on "Taking longer than expected", the phone likely cannot reach the dev server on the Mac.
+
+Try tunnel mode first:
 
 ```bash
 npm install
 npm start
 ```
 
-`@expo/ngrok` is listed in **devDependencies** so everyone gets the same tunnel package after `npm install`. Prefer that over letting Expo install it **globally** (global installs sometimes misbehave).
-
-**If tunnel crashes** with `Cannot read properties of undefined (reading 'body')` or an ngrok `CommandError`:
-- Retry once; check [ngrok status](https://status.ngrok.com/) for outages.
-- Run again after `npm install` so the local `@expo/ngrok` is present.
-- If it keeps failing, use **LAN mode** and fix the Mac **firewall** (section below) so `npm run start:lan` + QR works without tunnel.
-
-Scan the **tunnel** QR code (it will look different from the normal LAN URL).
-
-**If you prefer normal LAN mode**, on the Mac:
-
-1. **Phone and Mac on the same Wi‑Fi**; turn **VPN off** on both while testing.
-2. **Firewall:** *System Settings → Network → Firewall* — allow **incoming** connections for **Node**, **Terminal**, or **Cursor** (or temporarily turn the firewall off once to confirm that was the cause).
-3. Restart the dev server in LAN mode: `npx expo start --lan -c` (or `npm run start:lan -- --clear`).
-4. **Expo Go** must be a recent version compatible with **Expo SDK 54** (update from the App Store).
-
-If tunnel works but LAN does not, keep using **`npm start`** (tunnel) for demos until LAN/firewall is fixed.
+If tunnel mode fails, retry once and confirm dependencies are installed. For LAN mode, make sure the phone and Mac are on the same Wi-Fi, VPN is off, and the macOS firewall allows incoming connections for Node, Terminal, or your editor.

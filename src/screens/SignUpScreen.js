@@ -19,8 +19,13 @@ import { auth, db } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
 import { KOREAN_NATIVE_LABEL } from '../i18n/labels';
 import { STRINGS } from '../i18n/strings';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  signOut,
+  updateProfile,
+} from 'firebase/auth';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 function formatDate(date, language) {
   if (language === 'ko') {
@@ -113,22 +118,26 @@ export default function SignUpScreen({ navigation }) {
       return;
     }
 
+    /** @type {import('firebase/auth').User | null} */
+    let createdUser = null;
     try {
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
         password,
       );
-      const user = userCredential.user;
+      createdUser = userCredential.user;
+      const fullName = `${firstName} ${lastName}`.trim();
+      await updateProfile(createdUser, { displayName: fullName });
 
-      await setDoc(doc(db, 'users', user.uid), {
+      await setDoc(doc(db, 'users', createdUser.uid), {
         firstName,
         lastName,
-        fullName: `${firstName} ${lastName}`,
+        fullName,
         email,
         dateOfBirth: dob,
         languagePreference,
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
         sessionsFinished: 0,
         totalSessionSeconds: 0,
         totalSessionMinutes: 0,
@@ -142,9 +151,25 @@ export default function SignUpScreen({ navigation }) {
 
       hydrateLocale(languagePreference);
     } catch (error) {
+      if (createdUser) {
+        try {
+          await deleteUser(createdUser);
+        } catch {
+          try {
+            await signOut(auth);
+          } catch {
+            // ignore
+          }
+        }
+      }
       let errorMessage = error.message;
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = copy.emailInUse;
+      } else if (
+        error.code === 'permission-denied' ||
+        /missing or insufficient permissions/i.test(String(error.message || ''))
+      ) {
+        errorMessage = copy.signUpFirestorePermissionDenied;
       }
       Alert.alert(copy.signUpFailed, errorMessage);
     }

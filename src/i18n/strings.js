@@ -23,9 +23,12 @@ export const STRINGS = {
     errorTitle: 'Error',
     errorFillAll: 'Please fill in all fields.',
     signUpFailed: 'Sign Up Failed',
+    signUpFirestorePermissionDenied:
+      'Could not save your profile (database permission denied). Your new account was removed so you are not left half-registered. In the Firebase console, update Firestore rules so a signed-in user can create and update their own document at users/{their user id}, then try again.',
     emailInUse: 'That email address is already in use.',
     
     homeTitle: 'Hi, {name}!',
+    homeTitleFallbackName: 'there',
     homeSubtitle: 'Mindfulness Virtual Assistant',
     homeTodaysSession: "Today's session",
     homeAllSessions: 'All sessions',
@@ -88,9 +91,12 @@ export const STRINGS = {
     errorTitle: '오류',
     errorFillAll: '모든 항목을 입력해 주세요.',
     signUpFailed: '가입 실패',
+    signUpFirestorePermissionDenied:
+      '프로필을 저장할 수 없습니다(데이터베이스 권한 거부). 가입이 완료되지 않은 계정은 삭제되었습니다. Firebase 콘솔에서 Firestore 규칙을 수정해 로그인한 사용자가 users/{본인 ID} 문서를 만들고 수정할 수 있게 한 뒤 다시 시도해 주세요.',
     emailInUse: '이미 사용 중인 이메일입니다.',
     
     homeTitle: '안녕하세요, {name} 님!',
+    homeTitleFallbackName: '회원',
     homeSubtitle: '마음챙김 가상 도우미',
     homeTodaysSession: '오늘의 세션',
     homeAllSessions: '전체 세션',

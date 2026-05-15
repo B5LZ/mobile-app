@@ -22,8 +22,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import * as Speech from 'expo-speech';
@@ -230,6 +230,28 @@ function buildLocalBackendUri(baseUri) {
   } catch {
     return '';
   }
+}
+
+function firstWhitespaceToken(text) {
+  const s = typeof text === 'string' ? text.trim() : '';
+  if (!s) return '';
+  return s.split(/\s+/)[0] || '';
+}
+
+/** Prefer `users/{uid}.firstName`, else first word of `fullName` (sign-up stores both). */
+function greetingFirstNameFromUserDoc(data) {
+  if (!data || typeof data !== 'object') return '';
+  const fn = typeof data.firstName === 'string' ? data.firstName.trim() : '';
+  if (fn) return fn;
+  return firstWhitespaceToken(
+    typeof data.fullName === 'string' ? data.fullName : '',
+  );
+}
+
+function firstNameFromAuthDisplayName(displayName) {
+  return firstWhitespaceToken(
+    typeof displayName === 'string' ? displayName : '',
+  );
 }
 
 // ─── Floating Avatar Dock ─────────────────────────────────────────────────────
@@ -503,6 +525,7 @@ export default function HomeScreen({ navigation }) {
 
   // ── Completed-session tracking (Firestore) ──
   const [completedSessionIds, setCompletedSessionIds] = useState(() => new Set());
+  const [homeGreetingName, setHomeGreetingName] = useState('');
 
   useEffect(() => {
     let unsubUser = null;
@@ -513,16 +536,53 @@ export default function HomeScreen({ navigation }) {
       }
       if (!user) {
         setCompletedSessionIds(new Set());
+        setHomeGreetingName('');
         return;
       }
+      setHomeGreetingName(firstNameFromAuthDisplayName(user.displayName));
       const userRef = doc(db, 'users', user.uid);
+      void (async () => {
+        try {
+          const snap = await getDoc(userRef);
+          const data = snap.exists ? snap.data() : null;
+          const fromDoc = greetingFirstNameFromUserDoc(data);
+          if (fromDoc) {
+            setHomeGreetingName(fromDoc);
+          }
+          const full =
+            data &&
+            typeof data.fullName === 'string' &&
+            data.fullName.trim();
+          const built =
+            full ||
+            [data?.firstName, data?.lastName]
+              .filter((v) => typeof v === 'string' && v.trim())
+              .join(' ')
+              .trim();
+          if (built && !user.displayName?.trim()) {
+            void updateProfile(user, { displayName: built }).catch(() => {});
+          }
+        } catch {
+          // Firestore rules or network — keep displayName-based greeting
+        }
+      })();
       unsubUser = onSnapshot(
         userRef,
         (snap) => {
-          const ids = snap.exists() ? snap.data()?.completedSessionIds : null;
+          const data = snap.exists ? snap.data() : null;
+          const ids = data?.completedSessionIds;
           setCompletedSessionIds(new Set(Array.isArray(ids) ? ids : []));
+          const fromDoc = greetingFirstNameFromUserDoc(data);
+          setHomeGreetingName(
+            fromDoc || firstNameFromAuthDisplayName(user.displayName) || '',
+          );
         },
-        () => setCompletedSessionIds(new Set()),
+        () => {
+          setCompletedSessionIds(new Set());
+          setHomeGreetingName(
+            firstNameFromAuthDisplayName(user.displayName) || '',
+          );
+        },
       );
     });
     return () => {
@@ -826,7 +886,11 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.langBtnText}>{locale.toUpperCase()}</Text>
           </Pressable>
         </View>
-        <Text style={styles.headerTitle}>{t('homeTitle')}</Text>
+        <Text style={styles.headerTitle}>
+          {t('homeTitle', {
+            name: homeGreetingName || t('homeTitleFallbackName'),
+          })}
+        </Text>
         <Pressable
           onPress={handleLogout}
           style={({ pressed }) => [styles.logoutBtn, pressed && styles.topBtnPressed]}

@@ -48,7 +48,7 @@ export async function recordCompletedSession({
 
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(userRef);
-    const data = snapshot.exists() ? snapshot.data() : {};
+    const data = snapshot.exists ? snapshot.data() : {};
     const lastActiveDate = data.lastActiveDate || null;
     const diff = dayDifference(lastActiveDate, todayKey);
     const isNewActiveDay = lastActiveDate !== todayKey;

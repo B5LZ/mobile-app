@@ -54,7 +54,7 @@ export default function StatsScreen() {
     const unsub = onSnapshot(
       userRef,
       (snap) => {
-        setUserData(snap.exists() ? snap.data() : {});
+        setUserData(snap.exists ? snap.data() : {});
         setLoading(false);
       },
       () => {

@@ -16,7 +16,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
 import { KOREAN_NATIVE_LABEL } from '../i18n/labels';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from 'firebase/auth';
 import { ThemeColor, ThemeGradient, ThemeRadius } from '../theme/appTheme';
 
 /** Kept for any link styles; avoids ReferenceError if Metro serves a stale bundle. */
@@ -33,6 +36,7 @@ export default function SignInScreen({ navigation }) {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetSending, setResetSending] = useState(false);
 
   const toggleUILanguage = () => {
     void setLocale(locale === 'en' ? 'ko' : 'en');
@@ -48,9 +52,33 @@ export default function SignInScreen({ navigation }) {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      navigation.navigate('Home');
+      // App.js replaces this stack with the main app when auth state updates.
     } catch (error) {
       Alert.alert(t('signInFailedTitle'), t('signInFailedBody'));
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      Alert.alert(t('errorTitle'), t('signInForgotPasswordNeedEmail'));
+      return;
+    }
+    setResetSending(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmed);
+      Alert.alert(
+        t('signInPasswordResetSentTitle'),
+        t('signInPasswordResetSentBody'),
+      );
+    } catch (error) {
+      const message =
+        error?.code === 'auth/invalid-email'
+          ? t('signInPasswordResetInvalidEmail')
+          : error?.message || t('signInFailedBody');
+      Alert.alert(t('errorTitle'), message);
+    } finally {
+      setResetSending(false);
     }
   };
 
@@ -158,6 +186,22 @@ export default function SignInScreen({ navigation }) {
                 </LinearGradient>
               </Pressable>
             </View>
+
+            <Pressable
+              onPress={handleForgotPassword}
+              disabled={resetSending}
+              accessibilityRole="link"
+              accessibilityLabel={t('signInForgotPasswordLink')}
+              style={({ pressed }) => [
+                styles.forgotPasswordRow,
+                pressed && styles.forgotPasswordPressed,
+                resetSending && styles.forgotPasswordDisabled,
+              ]}
+            >
+              <Text style={styles.forgotPasswordText}>
+                {t('signInForgotPasswordLink')}
+              </Text>
+            </Pressable>
 
             <Pressable
               onPress={() => navigation.navigate('SignUp')}
@@ -287,9 +331,28 @@ const styles = StyleSheet.create({
     color: ThemeColor.TEXT_PRIMARY,
     fontWeight: '400',
   },
+  forgotPasswordRow: {
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginTop: -6,
+    marginBottom: 18,
+  },
+  forgotPasswordPressed: {
+    opacity: 0.65,
+  },
+  forgotPasswordDisabled: {
+    opacity: 0.45,
+  },
+  forgotPasswordText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: ThemeColor.TEXT_MUTED,
+    textDecorationLine: 'underline',
+  },
   buttonShadow: {
     marginTop: 10,
-    marginBottom: 28,
+    marginBottom: 10,
     borderRadius: ThemeRadius.SM,
     ...Platform.select({
       ios: {

@@ -14,10 +14,20 @@ import { STRINGS } from '../i18n/strings';
 /** @typedef {import('../i18n/strings').AppLocale} AppLocale */
 
 const LanguageContext = createContext(
-  /** @type {{ locale: AppLocale; setLocale: (l: AppLocale) => Promise<void>; hydrateLocale: (l: AppLocale) => void; t: (key: string) => string; }} */ (
+  /** @type {{ locale: AppLocale; setLocale: (l: AppLocale) => Promise<void>; hydrateLocale: (l: AppLocale) => void; t: (key: string, vars?: Record<string, string | number>) => string; }} */ (
     null
   ),
 );
+
+/** @param {string} template @param {Record<string, string | number> | undefined} vars */
+function interpolate(template, vars) {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (_, k) =>
+    Object.prototype.hasOwnProperty.call(vars, k) && vars[k] != null && String(vars[k]) !== ''
+      ? String(vars[k])
+      : `{${k}}`,
+  );
+}
 
 export function LanguageProvider({ children }) {
   const [locale, setLocaleState] = useState(/** @type {AppLocale} */ ('en'));
@@ -60,9 +70,10 @@ export function LanguageProvider({ children }) {
   }, []);
 
   const t = useCallback(
-    (/** @type {string} */ key) => {
+    (/** @type {string} */ key, /** @type {Record<string, string | number> | undefined} */ vars) => {
       const table = STRINGS[locale] ?? STRINGS.en;
-      return table[key] ?? STRINGS.en[key] ?? key;
+      const template = table[key] ?? STRINGS.en[key] ?? key;
+      return interpolate(template, vars);
     },
     [locale],
   );

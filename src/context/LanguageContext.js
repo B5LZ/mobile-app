@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
 import { STRINGS } from '../i18n/strings';
 
@@ -61,9 +61,11 @@ export function LanguageProvider({ children }) {
     const user = auth.currentUser;
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        languagePreference: next,
-      });
+      await setDoc(
+        doc(db, 'users', user.uid),
+        { languagePreference: next },
+        { merge: true },
+      );
     } catch {
       // Profile may be missing; ignore so UI still switches.
     }

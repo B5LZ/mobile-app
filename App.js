@@ -89,7 +89,7 @@ export default function App() {
           <Stack.Navigator>
             {user ? (
               <Stack.Screen
-                name="Home"
+                name="Main"
                 component={TabNavigator}
                 options={{ headerShown: false }}
               />

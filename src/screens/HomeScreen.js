@@ -1004,9 +1004,6 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.cardTitle}>{t('cardSettingsTitle')}</Text>
             <Text style={styles.cardText}>{t('cardSettingsText')}</Text>
           </Pressable>
-          <Pressable style={({ pressed }) => [styles.supportBtn, pressed && styles.btnPressed]} onPress={() => Alert.alert(t('supportTicket'), 'Coming soon.')}>
-            <Text style={styles.supportBtnText}>{t('supportTicket')}</Text>
-          </Pressable>
         </ScrollView>
       )}
 
@@ -1225,10 +1222,6 @@ const styles = StyleSheet.create({
   card:          { backgroundColor: ThemeColor.WHITE, padding: 20, borderRadius: 8, borderTopWidth: 4, borderTopColor: ThemeColor.BRAND, marginBottom: 14, ...cardShadow },
   cardTitle:     { fontSize: 18, fontWeight: '700', color: ThemeColor.BRAND, marginBottom: 5 },
   cardText:      { color: ThemeColor.HOME_CARD_TEXT, lineHeight: 22 },
-  supportBtn:    { backgroundColor: '#2ecc71', padding: 15, borderRadius: 8, marginTop: 4, alignItems: 'center' },
-  supportBtnText:{ color: ThemeColor.WHITE, fontWeight: '700', fontSize: 16 },
-
-  // Chat FAB
 
   // Session screen — single scrollable column, nothing gets compressed
   sessionLayout:       { flex: 1, backgroundColor: ThemeColor.SCREEN_BG },

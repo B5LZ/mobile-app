@@ -57,6 +57,12 @@ export const STRINGS = {
     signInWelcome: 'Welcome',
     signInSubtitle: 'Sign in to continue',
     signInButton: 'Sign In',
+    signInForgotPasswordLink: 'Forgot password?',
+    signInForgotPasswordNeedEmail: 'Enter your email address above first.',
+    signInPasswordResetSentTitle: 'Check your email',
+    signInPasswordResetSentBody:
+      'If an account exists for that address, we sent a link to reset your password.',
+    signInPasswordResetInvalidEmail: 'That email address does not look valid.',
     signInErrorBothFields: 'Please enter both email and password.',
     signInFailedTitle: 'Sign In Failed',
     signInFailedBody:
@@ -120,6 +126,12 @@ export const STRINGS = {
     signInWelcome: '환영합니다',
     signInSubtitle: '계속하려면 로그인하세요',
     signInButton: '로그인',
+    signInForgotPasswordLink: '비밀번호를 잊으셨나요?',
+    signInForgotPasswordNeedEmail: '먼저 위에 이메일 주소를 입력해 주세요.',
+    signInPasswordResetSentTitle: '이메일을 확인해 주세요',
+    signInPasswordResetSentBody:
+      '해당 주소로 가입된 계정이 있으면 비밀번호 재설정 링크를 보냈습니다.',
+    signInPasswordResetInvalidEmail: '이메일 형식이 올바르지 않습니다.',
     signInErrorBothFields: '이메일과 비밀번호를 모두 입력해 주세요.',
     signInFailedTitle: '로그인 실패',
     signInFailedBody:

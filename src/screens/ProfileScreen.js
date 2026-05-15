@@ -45,11 +45,8 @@ export default function ProfileScreen({ navigation }) {
     try {
       await signOut(auth);
     } catch {}
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'SignIn' }],
-    });
-  }, [navigation]);
+    // Auth listener in App.js switches to SignIn/SignUp; do not reset here — Tab navigator has no "SignIn" route.
+  }, []);
 
 
   const goTo = (screen) => {

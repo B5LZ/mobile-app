@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: multilingual-virtual-assistant
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 server.py
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_TTS_MODEL
+        value: gemini-3.1-flash-tts-preview
+      - key: GEMINI_TTS_VOICE
+        value: Iapetus

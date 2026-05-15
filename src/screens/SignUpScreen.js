@@ -129,11 +129,18 @@ export default function SignUpScreen({ navigation }) {
         dateOfBirth: dob,
         languagePreference,
         createdAt: new Date(),
+        sessionsFinished: 0,
+        totalSessionSeconds: 0,
+        totalSessionMinutes: 0,
         totalSessionTime: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+        totalActiveDays: 0,
+        totalDays: 0,
+        lastActiveDate: null,
       });
 
       hydrateLocale(languagePreference);
-      navigation.replace('Home');
     } catch (error) {
       let errorMessage = error.message;
       if (error.code === 'auth/email-already-in-use') {

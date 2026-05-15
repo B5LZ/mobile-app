@@ -1,0 +1,134 @@
+[
+  {
+    "id": "box-breathing",
+    "title": "Box Breathing",
+    "description": "A short breathing pattern to settle your mind and body.",
+    "steps": [
+      "Sit comfortably and relax your shoulders.",
+      "Inhale gently through your nose for 4 counts.",
+      "Hold your breath softly for 4 counts.",
+      "Exhale slowly for 4 counts, then pause for 4 counts before repeating."
+    ]
+  },
+  {
+    "id": "body-scan",
+    "title": "Body Scan",
+    "description": "A guided check-in from head to toe.",
+    "steps": [
+      "Close your eyes or soften your gaze.",
+      "Notice your forehead, jaw, and shoulders and release any tension.",
+      "Move your attention slowly through your chest, stomach, hips, and legs.",
+      "Finish by taking one slow breath and noticing how your body feels now."
+    ]
+  },
+  {
+    "id": "five-senses",
+    "title": "Five Senses Grounding",
+    "description": "A grounding exercise to reconnect with the present moment.",
+    "steps": [
+      "Name 5 things you can see around you.",
+      "Name 4 things you can physically feel.",
+      "Name 3 things you can hear right now.",
+      "Name 2 things you can smell and 1 thing you can taste."
+    ]
+  },
+  {
+    "id": "gratitude-pause",
+    "title": "Gratitude Pause",
+    "description": "A moment to gently shift attention toward what is good.",
+    "steps": [
+      "Take a slow breath in and out.",
+      "Think of one person, place, or memory you appreciate.",
+      "Notice what that gratitude feels like in your body.",
+      "Say quietly to yourself: Thank you for this moment."
+    ]
+  },
+  {
+    "id": "loving-kindness",
+    "title": "Loving Kindness",
+    "description": "A compassion-focused mindfulness practice.",
+    "steps": [
+      "Place a hand on your heart or rest your hands softly in your lap.",
+      "Repeat silently: May I be safe. May I be calm. May I be well.",
+      "Bring another person to mind and repeat the same wishes for them.",
+      "End by sending those wishes outward to everyone around you."
+    ]
+  },
+  {
+    "id": "mindful-walking",
+    "title": "Mindful Walking",
+    "description": "A light movement practice with full attention on each step.",
+    "steps": [
+      "Stand tall and notice the feeling of your feet on the ground.",
+      "Begin walking slowly and notice each foot lifting and landing.",
+      "Match your breathing to your pace without forcing it.",
+      "After a few steps, pause and notice how steady you feel."
+    ]
+  },
+  {
+    "id": "seated-stretch",
+    "title": "Seated Stretch Reset",
+    "description": "Gentle seated stretches to release tension.",
+    "steps": [
+      "Sit upright and take one slow breath.",
+      "Lift your shoulders toward your ears and roll them back down.",
+      "Gently stretch your neck to each side without forcing it.",
+      "Reach your arms overhead, then lower them slowly and rest."
+    ]
+  },
+  {
+    "id": "mindful-listening",
+    "title": "Mindful Listening",
+    "description": "A practice that centers attention through sound.",
+    "steps": [
+      "Sit quietly and close your eyes if that feels comfortable.",
+      "Notice the nearest sound you can hear.",
+      "Expand your attention to sounds farther away without judging them.",
+      "Return to one steady sound and follow it for one final breath."
+    ]
+  },
+  {
+    "id": "affirmation-breath",
+    "title": "Affirmation Breath",
+    "description": "Pair a calming phrase with your breath.",
+    "steps": [
+      "Choose a short phrase such as I am safe or I can slow down.",
+      "Breathe in gently and think the first half of the phrase.",
+      "Breathe out slowly and think the second half of the phrase.",
+      "Repeat for a few cycles and notice whether your body softens."
+    ]
+  },
+  {
+    "id": "stress-release",
+    "title": "Stress Release Check-In",
+    "description": "Notice, name, and soften what you are carrying.",
+    "steps": [
+      "Pause and ask yourself where stress is showing up in your body.",
+      "Name the feeling in one word without judging it.",
+      "Take a slow exhale and imagine creating space around that feeling.",
+      "End by reminding yourself that this moment can pass."
+    ]
+  },
+  {
+    "id": "morning-intention",
+    "title": "Morning Intention",
+    "description": "A simple intention-setting practice for the day.",
+    "steps": [
+      "Take one full breath and notice how you are arriving in this moment.",
+      "Ask yourself how you want to feel today.",
+      "Choose one intention word such as steady, kind, or patient.",
+      "Repeat that word to yourself three times before continuing your day."
+    ]
+  },
+  {
+    "id": "sleep-wind-down",
+    "title": "Sleep Wind Down",
+    "description": "A quiet practice to prepare your body for rest.",
+    "steps": [
+      "Dim your focus and settle into a comfortable resting position.",
+      "Take three slow breaths, each one a little longer on the exhale.",
+      "Let your jaw, shoulders, and hands soften.",
+      "Tell yourself: My body can rest now."
+    ]
+  }
+]

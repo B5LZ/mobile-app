@@ -2,9 +2,11 @@
 
 # dependencies
 node_modules/
+Mobile_Mindfulness_React/node_modules/
 
 # Expo
 .expo/
+Mobile_Mindfulness_React/.expo/
 dist/
 web-build/
 expo-env.d.ts

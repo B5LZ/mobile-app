@@ -23,12 +23,9 @@ export const STRINGS = {
     errorTitle: 'Error',
     errorFillAll: 'Please fill in all fields.',
     signUpFailed: 'Sign Up Failed',
-    signUpFirestorePermissionDenied:
-      'Could not save your profile (database permission denied). Your new account was removed so you are not left half-registered. In the Firebase console, update Firestore rules so a signed-in user can create and update their own document at users/{their user id}, then try again.',
     emailInUse: 'That email address is already in use.',
     
     homeTitle: 'Hi, {name}!',
-    homeTitleFallbackName: 'there',
     homeSubtitle: 'Mindfulness Virtual Assistant',
     homeTodaysSession: "Today's session",
     homeAllSessions: 'All sessions',
@@ -57,12 +54,6 @@ export const STRINGS = {
     signInWelcome: 'Welcome',
     signInSubtitle: 'Sign in to continue',
     signInButton: 'Sign In',
-    signInForgotPasswordLink: 'Forgot password?',
-    signInForgotPasswordNeedEmail: 'Enter your email address above first.',
-    signInPasswordResetSentTitle: 'Check your email',
-    signInPasswordResetSentBody:
-      'If an account exists for that address, we sent a link to reset your password.',
-    signInPasswordResetInvalidEmail: 'That email address does not look valid.',
     signInErrorBothFields: 'Please enter both email and password.',
     signInFailedTitle: 'Sign In Failed',
     signInFailedBody:
@@ -97,12 +88,9 @@ export const STRINGS = {
     errorTitle: '오류',
     errorFillAll: '모든 항목을 입력해 주세요.',
     signUpFailed: '가입 실패',
-    signUpFirestorePermissionDenied:
-      '프로필을 저장할 수 없습니다(데이터베이스 권한 거부). 가입이 완료되지 않은 계정은 삭제되었습니다. Firebase 콘솔에서 Firestore 규칙을 수정해 로그인한 사용자가 users/{본인 ID} 문서를 만들고 수정할 수 있게 한 뒤 다시 시도해 주세요.',
     emailInUse: '이미 사용 중인 이메일입니다.',
     
     homeTitle: '안녕하세요, {name} 님!',
-    homeTitleFallbackName: '회원',
     homeSubtitle: '마음챙김 가상 도우미',
     homeTodaysSession: '오늘의 세션',
     homeAllSessions: '전체 세션',
@@ -126,12 +114,6 @@ export const STRINGS = {
     signInWelcome: '환영합니다',
     signInSubtitle: '계속하려면 로그인하세요',
     signInButton: '로그인',
-    signInForgotPasswordLink: '비밀번호를 잊으셨나요?',
-    signInForgotPasswordNeedEmail: '먼저 위에 이메일 주소를 입력해 주세요.',
-    signInPasswordResetSentTitle: '이메일을 확인해 주세요',
-    signInPasswordResetSentBody:
-      '해당 주소로 가입된 계정이 있으면 비밀번호 재설정 링크를 보냈습니다.',
-    signInPasswordResetInvalidEmail: '이메일 형식이 올바르지 않습니다.',
     signInErrorBothFields: '이메일과 비밀번호를 모두 입력해 주세요.',
     signInFailedTitle: '로그인 실패',
     signInFailedBody:
@@ -144,7 +126,7 @@ export const STRINGS = {
     profileTitle: '프로필',
     personalInformation: '개인 정보',
     settings: '설정',
-    support: '지원하다',
+    support: '지원',
 
     homeTab: '홈',
     myStatsTab: '내 통계',

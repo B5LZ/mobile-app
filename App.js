@@ -14,6 +14,7 @@ import SignUpScreen from './src/screens/SignUpScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import StatsScreen from './src/screens/StatsScreen';
+import SupportScreen from './src/screens/SupportScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -88,11 +89,19 @@ export default function App() {
         <NavigationContainer>
           <Stack.Navigator>
             {user ? (
+              <>
               <Stack.Screen
                 name="Main"
                 component={TabNavigator}
                 options={{ headerShown: false }}
               />
+              <Stack.Screen
+                name="Support"
+                component={SupportScreen}
+                options={{ headerShown: false }}
+              />
+
+              </>
             ) : (
               <>
                 <Stack.Screen

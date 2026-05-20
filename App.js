@@ -13,11 +13,25 @@ import SignInScreen from './src/screens/SignInScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import PersonalInformationScreen from './src/screens/PersonalInformationScreen';
 import StatsScreen from './src/screens/StatsScreen';
 import SupportScreen from './src/screens/SupportScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+const ProfileStack = createStackNavigator();
+
+function ProfileStackNavigator() {
+  return (
+    <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
+      <ProfileStack.Screen name="ProfileHome" component={ProfileScreen} />
+      <ProfileStack.Screen
+        name="PersonalInfo"
+        component={PersonalInformationScreen}
+      />
+    </ProfileStack.Navigator>
+  );
+}
 
 function TabNavigator() {
   return (
@@ -51,7 +65,7 @@ function TabNavigator() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        component={ProfileStackNavigator}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />

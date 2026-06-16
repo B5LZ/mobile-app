@@ -1,65 +1,122 @@
 # Multilingual Virtual Assistant Mindfulness
 
-This repository combines the mindfulness web/avatar chatbot, backend services, and the mobile version of the Multi-Language Wellness App.
+## Problem
 
-## Projects
+Caregivers and other high-stress users often need immediate, low-friction mindfulness support in moments when opening a long program or finding a clinician is unrealistic. The goal of this project is to provide a multilingual mindfulness experience that feels accessible on mobile, supports short guided sessions, and offers an interactive assistant for simple emotional support and mindfulness-related questions.
 
-- `Web_Mindfulness_Chatbot/` contains the browser-based mindfulness chatbot and avatar experience.
-- `Mobile_Mindfulness_React/` contains the earlier mobile mindfulness React project.
-- The repository root now also contains the merged Expo mobile app from `mobile-app`.
-- `server.py`, `chatbot.py`, `requirements.txt`, and `render.yaml` support the Python backend/deployment flow.
+## What We Implemented
 
-## Mobile App Setup
+This repository combines a React Native / Expo mobile app with a Python backend and an embedded avatar-based chat experience.
 
-The merged mobile app is built with JavaScript, React Native, and Expo.
+- A mobile mindfulness app built with Expo and React Native
+- Guided session flows, including scripted mindfulness exercises
+- Firebase authentication for user sign-in and session-linked app data
+- A Python backend that powers chat, streaming responses, and text-to-speech
+- An embedded avatar / WebView experience for guided interaction and spoken responses
+- Session tracking and lightweight progress data tied to authenticated users
 
-1. Create a local `.env` file at the repository root.
-2. Add the Firebase keys required by `src/config/firebaseConfig.js`.
-3. Install dependencies:
+## Tech Stack
+
+### Mobile
+
+- React Native
+- Expo
+- Firebase Auth
+- Firestore
+- React Navigation
+- React Native WebView
+
+### Backend
+
+- Python
+- Google Gemini
+- Edge TTS
+- Render for deployment
+
+## Security Measures
+
+The backend and client were hardened to reduce unauthorized access, cross-user exposure, and model-cost abuse.
+
+### API Access Controls
+
+- Browser CORS is restricted to trusted origins instead of `*`
+- Chat sessions are server-issued and use cryptographically strong session tokens
+- Session state is bound to the authenticated Firebase user that created it
+- Session-scoped endpoints reject access from other authenticated users even if a session ID is known
+- The backend now requires a valid Firebase bearer token for protected operations
+
+### Abuse and Cost Controls
+
+- Request body size limits are enforced
+- Chat message length and TTS text length are capped
+- Rate limiting is applied to general API traffic, chat, streaming chat, and TTS
+- User-level limits were added to reduce token and TTS abuse from a single account
+- Gemini output token ceilings were reduced to lower spend per request
+
+### Data Exposure Controls
+
+- Raw backend/provider errors are no longer returned directly to clients
+- Cache-control and content-type hardening headers are returned by the API
+- Session query strings are redacted from server logs
+- The avatar transcript no longer persists long-term in `localStorage`; transient chat history is kept in session storage
+
+### Client Hardening
+
+- Production API use defaults to HTTPS
+- The WebView path was tightened to reduce mixed-content risk in production
+- Auth for the avatar flow is passed in memory through the host bridge rather than URL parameters
+
+## Deployment
+
+The Python backend is configured for Render using [render.yaml](/Users/davidle/Documents/Mindfulness-App/render.yaml:1).
+
+### Required Environment Variables
+
+- `GOOGLE_API_KEY`
+- `EXPO_PUBLIC_FIREBASE_API_KEY`
+- `ALLOWED_ORIGINS`
+
+Optional hardening and tuning variables:
+
+- `CHAT_RATE_LIMIT`
+- `TTS_RATE_LIMIT`
+- `GENERAL_RATE_LIMIT`
+- `USER_CHAT_RATE_LIMIT`
+- `USER_TTS_RATE_LIMIT`
+- `USER_GENERAL_RATE_LIMIT`
+- `MAX_MESSAGE_LENGTH`
+- `MAX_TTS_TEXT_LENGTH`
+- `SESSION_TTL_SECONDS`
+- `GEMINI_MAX_OUTPUT_TOKENS`
+- `ENFORCE_FIREBASE_AUTH`
+- `REQUIRE_EMAIL_VERIFIED`
+
+### Local Run
+
+1. Install dependencies:
 
 ```bash
 npm install
+pip install -r requirements.txt
 ```
 
-4. Start Expo:
+2. Create a local `.env` file with the required Firebase and backend keys.
+
+3. Start the mobile app:
 
 ```bash
 npm start
 ```
 
-`npm start` uses tunnel mode by default for reliable Expo Go testing when LAN access is blocked.
-
-Other mobile start commands:
+4. Start the backend:
 
 ```bash
-npm run start:lan
-npm run start:tunnel
+python3 server.py
 ```
 
-## Viewing The App On Mobile
+### Production Notes
 
-1. Install Expo Go on your mobile device.
-2. Start the app with `npm start`.
-3. Scan the QR code shown in the terminal.
-4. Wait for Expo Go to load the app.
-
-## Mac Developers
-
-The easiest path is to use Expo Go on a real iPhone and scan the QR code from the dev server. Xcode is not required for normal device testing.
-
-If you see an `unable to run simctl` or `xcrun simctl failed` warning while using a physical device, you can ignore it as long as Metro starts and the QR code appears. Avoid pressing `i` unless you intend to use the iOS Simulator.
-
-Only install and configure Xcode if you want to run the app in the iOS Simulator.
-
-## Expo Go Loading Issues On Mac
-
-If Expo Go gets stuck on "Taking longer than expected", the phone likely cannot reach the dev server on the Mac.
-
-Try tunnel mode first:
-
-```bash
-npm install
-npm start
-```
-
-If tunnel mode fails, retry once and confirm dependencies are installed. For LAN mode, make sure the phone and Mac are on the same Wi-Fi, VPN is off, and the macOS firewall allows incoming connections for Node, Terminal, or your editor.
+- Keep Firebase and Gemini keys in environment variables only
+- Set `ALLOWED_ORIGINS` explicitly for your deployed frontend origins
+- Keep `ENFORCE_FIREBASE_AUTH=1` in production
+- Review Firestore security rules separately, since those are not stored in this repository

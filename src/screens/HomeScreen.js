@@ -36,7 +36,20 @@ import { recordCompletedSession } from '../utils/sessionTracking';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_BASE_URL     = 'https://multilingual-virtual-assistant.onrender.com';
+const DEFAULT_API_BASE_URL = 'https://multilingual-virtual-assistant.onrender.com';
+const EXPO_API_BASE_URL = process.env.EXPO_PUBLIC_MINDFULNESS_API_BASE_URL || '';
+const DEV_HTTP_HOST_PATTERN =
+  /^(https?:\/\/)?(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+)/i;
+
+function resolveApiBaseUrl() {
+  const candidate = String(EXPO_API_BASE_URL || '').trim().replace(/\/$/, '');
+  if (!candidate) return DEFAULT_API_BASE_URL;
+  if (candidate.startsWith('https://')) return candidate;
+  if (__DEV__ && DEV_HTTP_HOST_PATTERN.test(candidate)) return candidate;
+  return DEFAULT_API_BASE_URL;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DOCK_WIDTH           = Math.min(SCREEN_WIDTH - 32, 320);
 const DOCK_HEIGHT          = 480;
@@ -148,10 +161,17 @@ const INITIAL_CHAT_MESSAGE = {
   content: 'Hi, I can answer general mindfulness questions and explain any session tile in the app. Open a session first if you want details about that specific practice.',
 };
 
+const PROD_MIXED_CONTENT_MODE = 'never';
+const DEV_MIXED_CONTENT_MODE = 'always';
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createSessionId() {
-  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  const randomPart = Math.random().toString(16).slice(2);
+  return `session-${Date.now()}-${randomPart}`;
 }
 
 function formatDuration(totalSeconds) {
@@ -300,7 +320,7 @@ function FloatingAvatarDock({ avatarUri, avatarError, expanded, visible, onToggl
           allowFileAccess
           allowUniversalAccessFromFileURLs
           allowFileAccessFromFileURLs
-          mixedContentMode="always"
+          mixedContentMode={__DEV__ ? DEV_MIXED_CONTENT_MODE : PROD_MIXED_CONTENT_MODE}
           javaScriptEnabled
           domStorageEnabled
           scrollEnabled={false}
@@ -342,7 +362,7 @@ function SessionAvatarPanel({ avatarUri, avatarError, webViewRef, onLoad, onMess
           allowFileAccess
           allowUniversalAccessFromFileURLs
           allowFileAccessFromFileURLs
-          mixedContentMode="always"
+          mixedContentMode={__DEV__ ? DEV_MIXED_CONTENT_MODE : PROD_MIXED_CONTENT_MODE}
           javaScriptEnabled
           domStorageEnabled
           scrollEnabled={false}
@@ -394,17 +414,36 @@ function SummaryModal({ visible, duration, summary, onClose }) {
 
 // ─── Chat Modal ───────────────────────────────────────────────────────────────
 
-function ChatModal({ visible, onClose, sessionContext }) {
+function ChatModal({ visible, onClose, sessionContext, buildApiHeaders }) {
   const [messages, setMessages] = useState([INITIAL_CHAT_MESSAGE]);
   const [draft, setDraft]       = useState('');
   const [busy, setBusy]         = useState(false);
   const [status, setStatus]     = useState('Ready');
-  const chatSessionId           = useRef(createSessionId()).current;
+  const sessionCredentialsRef   = useRef(null);
   const scrollRef               = useRef(null);
 
   useEffect(() => {
     if (visible) setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
   }, [visible, messages]);
+
+  const ensureSession = useCallback(async () => {
+    if (sessionCredentialsRef.current?.sessionId && sessionCredentialsRef.current?.sessionToken) {
+      return sessionCredentialsRef.current;
+    }
+    const res = await fetch(`${API_BASE_URL}/session/start`, {
+      method: 'POST',
+      headers: await buildApiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error('Failed to start chat session');
+    const data = await res.json();
+    const credentials = {
+      sessionId: data.session_id,
+      sessionToken: data.session_token,
+    };
+    sessionCredentialsRef.current = credentials;
+    return credentials;
+  }, []);
 
   const send = useCallback(async () => {
     const trimmed = draft.trim();
@@ -414,13 +453,22 @@ function ChatModal({ visible, onClose, sessionContext }) {
     setBusy(true);
     setStatus('Thinking…');
     try {
+      const credentials = await ensureSession();
       const res = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: buildChatPrompt(trimmed, sessionContext), session_id: chatSessionId }),
+        headers: await buildApiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          message: buildChatPrompt(trimmed, sessionContext),
+          session_id: credentials.sessionId,
+          session_token: credentials.sessionToken,
+        }),
       });
       if (!res.ok) throw new Error(await res.text() || 'Request failed');
       const data = await res.json();
+      sessionCredentialsRef.current = {
+        sessionId: data.session_id || credentials.sessionId,
+        sessionToken: data.session_token || credentials.sessionToken,
+      };
       setMessages((prev) => [...prev, { id: `assistant-${Date.now()}`, role: 'assistant', content: data.reply || '(No response.)' }]);
       setStatus('Ready');
     } catch {
@@ -429,7 +477,7 @@ function ChatModal({ visible, onClose, sessionContext }) {
     } finally {
       setBusy(false);
     }
-  }, [draft, busy, chatSessionId, sessionContext]);
+  }, [draft, busy, ensureSession, sessionContext, buildApiHeaders]);
 
   return (
     <Modal visible={visible} transparent animationType="slide">
@@ -516,6 +564,7 @@ export default function HomeScreen({ navigation }) {
   const homeDockWebViewRef                        = useRef(null);
   const homeDockLoadCount                         = useRef(0);
   const avatarVoiceId                             = useRef(null);
+  const authTokenRef                              = useRef('');
 
   // ── Session state ──
   const [sessionActive, setSessionActive]         = useState(false);
@@ -657,6 +706,57 @@ export default function HomeScreen({ navigation }) {
     setAvatarLoadError(`WebView load failed: ${detail}`);
   }, []);
 
+  const injectAuthIntoWebView = useCallback((ref, token) => {
+    if (!ref?.current || !token) return;
+    const payload = JSON.stringify({
+      source: 'mindfulness-host',
+      type: 'host-set-auth',
+      token,
+    });
+    ref.current.injectJavaScript(
+      `(function(){try{window._nativeHostCommand(${payload});}catch(e){}})();true;`
+    );
+  }, []);
+
+  const buildApiHeaders = useCallback(async (headers = {}) => {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('Not authenticated');
+    }
+    const token = await user.getIdToken();
+    authTokenRef.current = token;
+    injectAuthIntoWebView(sessionWebViewRef, token);
+    injectAuthIntoWebView(homeDockWebViewRef, token);
+    return {
+      ...headers,
+      Authorization: `Bearer ${token}`,
+    };
+  }, [injectAuthIntoWebView]);
+
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!active) return;
+      if (!user) {
+        authTokenRef.current = '';
+        return;
+      }
+      try {
+        const token = await user.getIdToken();
+        if (!active) return;
+        authTokenRef.current = token;
+        injectAuthIntoWebView(sessionWebViewRef, token);
+        injectAuthIntoWebView(homeDockWebViewRef, token);
+      } catch {
+        if (active) authTokenRef.current = '';
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [injectAuthIntoWebView]);
+
   // ── Pick a male English voice for native TTS ──
   useEffect(() => {
     const MALE_NAMES = ['alex', 'daniel', 'tom', 'evan', 'gordon', 'fred', 'rishi', 'aaron', 'lee', 'arthur'];
@@ -720,6 +820,9 @@ export default function HomeScreen({ navigation }) {
   const handleSessionAvatarLoad = useCallback(() => {
     setTimeout(() => {
       sessionWebViewRef.current?.injectJavaScript(HIDE_CONTROLS_JS);
+      if (authTokenRef.current) {
+        injectAuthIntoWebView(sessionWebViewRef, authTokenRef.current);
+      }
     }, 300);
     if (sessionActive) {
       setTimeout(() => {
@@ -736,11 +839,14 @@ export default function HomeScreen({ navigation }) {
         injectAvatarCommand({ type: 'host-start-session', prompt, announce: false });
       }, 700);
     }
-  }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand]);
+  }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand, injectAuthIntoWebView]);
 
   const handleHomeDockLoad = useCallback(() => {
     setTimeout(() => {
       homeDockWebViewRef.current?.injectJavaScript(HIDE_CONTROLS_JS);
+      if (authTokenRef.current) {
+        injectAuthIntoWebView(homeDockWebViewRef, authTokenRef.current);
+      }
     }, 300);
     homeDockLoadCount.current += 1;
     if (homeDockLoadCount.current === 1) {
@@ -755,7 +861,7 @@ export default function HomeScreen({ navigation }) {
         );
       }, 600);
     }
-  }, []);
+  }, [injectAuthIntoWebView]);
 
   // ── Navigation guards ──
   useLayoutEffect(() => {

@@ -2654,8 +2654,8 @@ function getCurrentOriginServer(){
   }
   return '';
 }
-const SERVER_CANDIDATES=[getCurrentOriginServer(),LOCAL_SERVER,REMOTE_SERVER].filter(Boolean);
-const TTS_SERVER_CANDIDATES=[TTS_BASE_URL,LOCAL_SERVER,getCurrentOriginServer(),REMOTE_SERVER].filter(Boolean);
+const SERVER_CANDIDATES=[getCurrentOriginServer(),REMOTE_SERVER,LOCAL_SERVER].filter(Boolean);
+const TTS_SERVER_CANDIDATES=[TTS_BASE_URL,getCurrentOriginServer(),REMOTE_SERVER,LOCAL_SERVER].filter(Boolean);
 async function fetchFromCandidates(path, options={}, preferredBases=SERVER_CANDIDATES){
   let lastError=null;
   for(const base of [...new Set(preferredBases)]){
@@ -2669,9 +2669,58 @@ async function fetchFromCandidates(path, options={}, preferredBases=SERVER_CANDI
   }
   throw lastError||new Error(`Request failed for ${path}`);
 }
-let sid=SHARED_CHAT_ID||null;
+let sid=null;
+let sessionToken='';
+let authBearerToken='';
 let messageLog=[];
-function getTranscriptStorageKey(){return sid?`mindfulness-avatar-transcript:${sid}`:'';}
+const SESSION_ID_STORAGE_PREFIX='mindfulness-avatar-session:';
+const TRANSCRIPT_STORAGE_PREFIX='mindfulness-avatar-transcript:';
+function getClientSessionKey(){return SHARED_CHAT_ID||HOST_KEY||'default';}
+function getSessionStorageKey(){return `${SESSION_ID_STORAGE_PREFIX}${getClientSessionKey()}`;}
+function getTranscriptStorageKey(){
+  const key=sid||getClientSessionKey();
+  return key?`${TRANSCRIPT_STORAGE_PREFIX}${key}`:'';
+}
+function loadStoredSession(){
+  try{
+    const raw=localStorage.getItem(getSessionStorageKey());
+    const parsed=raw?JSON.parse(raw):null;
+    if(parsed&&parsed.sessionId&&parsed.sessionToken){
+      sid=parsed.sessionId;
+      sessionToken=parsed.sessionToken;
+    }
+  }catch{}
+}
+function persistSession(){
+  if(!sid||!sessionToken)return;
+  try{
+    localStorage.setItem(getSessionStorageKey(),JSON.stringify({sessionId:sid,sessionToken}));
+  }catch{}
+}
+function clearStoredSession(){
+  sid=null;
+  sessionToken='';
+  try{localStorage.removeItem(getSessionStorageKey());}catch{}
+}
+function withAuthHeaders(headers={}){
+  if(!authBearerToken)return headers;
+  return {...headers,Authorization:`Bearer ${authBearerToken}`};
+}
+async function ensureServerSession(){
+  if(sid&&sessionToken)return {sessionId:sid,sessionToken};
+  if(!authBearerToken)throw new Error('Missing authenticated user token');
+  const response=await fetchFromCandidates('/session/start',{
+    method:'POST',
+    headers:withAuthHeaders({'Content-Type':'application/json'}),
+    body:'{}'
+  });
+  const data=await response.json();
+  sid=data.session_id||'';
+  sessionToken=data.session_token||'';
+  if(!sid||!sessionToken)throw new Error('Missing session credentials');
+  persistSession();
+  return {sessionId:sid,sessionToken};
+}
 function shouldKeepStoredMessage(entry){
   const text=(entry&&entry.text)||'';
   if(!text)return true;
@@ -2684,7 +2733,7 @@ function shouldKeepStoredMessage(entry){
 function persistTranscript(){
   const key=getTranscriptStorageKey();
   if(!key)return;
-  try{localStorage.setItem(key,JSON.stringify(messageLog));}catch{}
+  try{sessionStorage.setItem(key,JSON.stringify(messageLog));}catch{}
 }
 function renderTranscript(){
   msgsEl.innerHTML='';
@@ -2700,7 +2749,7 @@ function restoreTranscript(){
   const key=getTranscriptStorageKey();
   if(!key)return false;
   try{
-    const raw=localStorage.getItem(key);
+    const raw=sessionStorage.getItem(key);
     const parsed=raw?JSON.parse(raw):[];
     if(!Array.isArray(parsed))return false;
     messageLog=parsed.filter(shouldKeepStoredMessage);
@@ -2711,13 +2760,36 @@ function restoreTranscript(){
     return false;
   }
 }
-async function apiChat(msg){const r=await fetchFromCandidates('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,session_id:sid})});return(await r.json()).reply;}
-async function apiEnd(){if(!sid)return null;try{const r=await fetchFromCandidates('/session/end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sid})});return(await r.json()).summary;}catch{return null;}}
+async function apiChat(msg){
+  const creds=await ensureServerSession();
+  const r=await fetchFromCandidates('/chat',{
+    method:'POST',
+    headers:withAuthHeaders({'Content-Type':'application/json'}),
+    body:JSON.stringify({message:msg,session_id:creds.sessionId,session_token:creds.sessionToken})
+  });
+  const data=await r.json();
+  sid=data.session_id||creds.sessionId;
+  sessionToken=data.session_token||creds.sessionToken;
+  persistSession();
+  return data.reply;
+}
+async function apiEnd(){
+  if(!sid||!sessionToken)return null;
+  try{
+    const r=await fetchFromCandidates('/session/end',{
+      method:'POST',
+      headers:withAuthHeaders({'Content-Type':'application/json'}),
+      body:JSON.stringify({session_id:sid,session_token:sessionToken})
+    });
+    return(await r.json()).summary;
+  }catch{return null;}
+}
 
 async function* streamChat(prompt){
+  const creds=await ensureServerSession();
   const res=await fetchFromCandidates('/chat/stream',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({message:prompt,session_id:sid}),
+    method:'POST',headers:withAuthHeaders({'Content-Type':'application/json'}),
+    body:JSON.stringify({message:prompt,session_id:creds.sessionId,session_token:creds.sessionToken}),
   });
   const reader=res.body.getReader();
   const dec=new TextDecoder();
@@ -2732,7 +2804,12 @@ async function* streamChat(prompt){
       if(!part.startsWith('data: '))continue;
       const evt=JSON.parse(part.slice(6));
       if(evt.error)throw new Error(evt.error);
-      if(evt.done)return;
+      if(evt.done){
+        sid=evt.session_id||creds.sessionId;
+        sessionToken=evt.session_token||creds.sessionToken;
+        persistSession();
+        return;
+      }
       if(evt.chunk)yield evt.chunk;
     }
   }
@@ -2790,7 +2867,7 @@ function setUi(active){inp.disabled=!active;bsend.disabled=!active;bend.disabled
 async function startAvatarSession(options={}){
   const { promptOverride=null, announce=true } = options;
   const hasTranscript=messageLog.length>0;
-  if(!sid)sid=SHARED_CHAT_ID||createSessionId();
+  await ensureServerSession();
   setUi(true);
   if(!hasTranscript&&announce)addMsg('system',`${SESSION_NAME} session started. Your mindfulness guide is here.`);
   setSt('thinking',HOST_KEY==='home-dock'?'Preparing welcome…':'Thinking…');inp.focus();setTyp(true);
@@ -2802,7 +2879,7 @@ async function startAvatarSession(options={}){
 async function speakScriptLine(text){
   const trimmed=(text||'').trim();
   if(!trimmed)return;
-  if(!sid)sid=SHARED_CHAT_ID||createSessionId();
+  await ensureServerSession();
   setUi(true);
   setTyp(false);
   addMsg('assistant',trimmed);
@@ -2811,7 +2888,7 @@ async function speakScriptLine(text){
 bstart.addEventListener('click',startAvatarSession);
 bend.addEventListener('click',async()=>{
   stopSpeech('Session ended');setTyp(true);
-  const s=await apiEnd();setTyp(false);sid=null;setUi(false);
+  const s=await apiEnd();setTyp(false);clearStoredSession();setUi(false);
   addMsg('system',s?'Session summary:\n'+s:'Session ended. Take care.');
 });
 async function handleSend(){
@@ -2866,6 +2943,11 @@ window.addEventListener('message',event=>{
     return;
   }
 
+  if(data.type==='host-set-auth'){
+    authBearerToken=data.token||'';
+    return;
+  }
+
   if(data.type==='host-end-session'){
     hostEndSession();
     return;
@@ -2883,6 +2965,7 @@ window._nativeHostCommand=function(cmd){
   if(cmd.type==='host-start-session'){startAvatarSession({promptOverride:cmd.prompt||null,announce:cmd.announce!==false});return;}
   if(cmd.type==='host-send-text'){if(!sid&&cmd.text){startAvatarSession({promptOverride:cmd.text,announce:false});return;}inp.value=cmd.text||'';handleSend();return;}
   if(cmd.type==='host-speak-script'){speakScriptLine(cmd.text||'');return;}
+  if(cmd.type==='host-set-auth'){authBearerToken=cmd.token||'';return;}
   if(cmd.type==='host-end-session'){hostEndSession();return;}
   if(cmd.type==='host-pause-session'){hostPauseSession();}
 };
@@ -2890,6 +2973,7 @@ window._nativeHostCommand=function(cmd){
 bsend.addEventListener('click',()=>{unlockCtx();handleSend();});
 inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();unlockCtx();handleSend();}});
 ttschk.addEventListener('change',()=>{unlockCtx();if(ttschk.checked)audioState.prime().catch(()=>{});else stopSpeech('Listening…');});
+loadStoredSession();
 const hasStoredTranscript=restoreTranscript();
 if(hasStoredTranscript){
   setUi(true);

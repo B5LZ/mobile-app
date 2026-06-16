@@ -27,6 +27,7 @@ GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Iapetus")
 GEMINI_TTS_SAMPLE_RATE = 24000
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AndrewMultilingualNeural")
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "1024"))
 
 
 async def _edge_tts_async(text, voice):
@@ -225,7 +226,7 @@ def call_gemini_stream(prompt, model="gemini-3.1-flash-lite-preview", temperatur
         temperature=temperature,
         top_p=0.95,
         top_k=40,
-        max_output_tokens=8192,
+        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
     )
     response = model_obj.generate_content(
         prompt,
@@ -246,7 +247,7 @@ def call_gemini(prompt, model="gemini-3.1-flash-lite-preview", temperature=0.7):
         temperature=temperature,
         top_p=0.95,
         top_k=40,
-        max_output_tokens=8192,
+        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
     )
 
     response = model_obj.generate_content(

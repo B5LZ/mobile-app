@@ -11,7 +11,11 @@ services:
         value: 3.11.11
       - key: GOOGLE_API_KEY
         sync: false
+      - key: EXPO_PUBLIC_FIREBASE_API_KEY
+        sync: false
       - key: GEMINI_TTS_MODEL
         value: gemini-3.1-flash-tts-preview
       - key: GEMINI_TTS_VOICE
         value: Iapetus
+      - key: ALLOWED_ORIGINS
+        value: https://multilingual-virtual-assistant.onrender.com

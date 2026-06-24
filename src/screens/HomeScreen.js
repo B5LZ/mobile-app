@@ -140,6 +140,8 @@ const INITIAL_CHAT_MESSAGE = {
   content: 'Hi, I can answer general mindfulness questions and explain any session tile in the app. Open a session first if you want details about that specific practice.',
 };
 
+const AVATAR_WELCOME_LINE = "Hello. I'm your mindfulness assistant, and I'm here to help. How are you doing today?";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createSessionId() {
@@ -216,6 +218,21 @@ function buildAvatarUri(baseUri, params) {
   return `${baseUri}${baseUri.includes('?') ? '&' : '?'}${qs}`;
 }
 
+function resolvePackagerAssetUri(asset) {
+  if (!asset) return null;
+  const remote = asset.uri;
+  const local = asset.localUri;
+  if (remote && /^https?:\/\//i.test(remote)) return remote;
+  return local || remote || null;
+}
+
+function getFileUriParentDirectory(fileUri) {
+  if (!fileUri || !String(fileUri).startsWith('file://')) return undefined;
+  const lastSlash = fileUri.lastIndexOf('/');
+  if (lastSlash <= 'file://'.length) return undefined;
+  return fileUri.slice(0, lastSlash + 1);
+}
+
 function buildLocalBackendUri(baseUri) {
   try {
     const url = new URL(baseUri);
@@ -258,7 +275,7 @@ function firstNameFromAuthDisplayName(displayName) {
 // Always mounted — opacity:0 + pointerEvents:none when not visible so the
 // WebView keeps running and localStorage / chat state survives screen transitions.
 
-function FloatingAvatarDock({ avatarUri, avatarError, expanded, visible, onToggle, webViewRef, onLoad, onMessage, onError }) {
+function FloatingAvatarDock({ avatarUri, avatarError, avatarReadAccessUri, expanded, visible, onToggle, webViewRef, onLoad, onMessage, onError }) {
   const hiddenStyle = !visible && styles.floatingHidden;
 
   if (!expanded) {
@@ -292,6 +309,7 @@ function FloatingAvatarDock({ avatarUri, avatarError, expanded, visible, onToggl
           allowFileAccess
           allowUniversalAccessFromFileURLs
           allowFileAccessFromFileURLs
+          allowingReadAccessToURL={avatarReadAccessUri}
           mixedContentMode="always"
           javaScriptEnabled
           domStorageEnabled
@@ -322,7 +340,7 @@ function FloatingAvatarDock({ avatarUri, avatarError, expanded, visible, onToggl
 
 // ─── Session Avatar Panel ─────────────────────────────────────────────────────
 
-function SessionAvatarPanel({ avatarUri, avatarError, webViewRef, onLoad, onMessage, onError }) {
+function SessionAvatarPanel({ avatarUri, avatarError, avatarReadAccessUri, webViewRef, onLoad, onMessage, onError }) {
   return (
     <View style={styles.sessionAvatarPanel}>
       {avatarUri ? (
@@ -334,6 +352,7 @@ function SessionAvatarPanel({ avatarUri, avatarError, webViewRef, onLoad, onMess
           allowFileAccess
           allowUniversalAccessFromFileURLs
           allowFileAccessFromFileURLs
+          allowingReadAccessToURL={avatarReadAccessUri}
           mixedContentMode="always"
           javaScriptEnabled
           domStorageEnabled
@@ -502,11 +521,14 @@ export default function HomeScreen({ navigation }) {
   // ── Avatar ──
   const avatarConversationId                      = useRef(createSessionId()).current;
   const [avatarHtmlBase, setAvatarHtmlBase]       = useState(null);
+  const [avatarModelUri, setAvatarModelUri]       = useState(null);
+  const [avatarReadAccessUri, setAvatarReadAccessUri] = useState(null);
   const [avatarLoadError, setAvatarLoadError]     = useState('');
   const [dockExpanded, setDockExpanded]           = useState(true);
   const sessionWebViewRef                         = useRef(null);
   const homeDockWebViewRef                        = useRef(null);
   const homeDockLoadCount                         = useRef(0);
+  const homeWelcomePlayed                         = useRef(false);
   const avatarVoiceId                             = useRef(null);
 
   // ── Session state ──
@@ -599,31 +621,33 @@ export default function HomeScreen({ navigation }) {
 
   // ── Avatar URIs — same chat_id for shared server-side conversation thread ──
   const homeDockUri = useMemo(() => buildAvatarUri(avatarHtmlBase, {
-    compact: '1', host: 'home-dock', autostart: '1', chat_id: avatarConversationId, tts_base: avatarBackendUri,
-  }), [avatarHtmlBase, avatarConversationId, avatarBackendUri]);
+    compact: '1', host: 'home-dock', chat_id: avatarConversationId, tts_base: avatarBackendUri, model_url: avatarModelUri,
+  }), [avatarHtmlBase, avatarConversationId, avatarBackendUri, avatarModelUri]);
 
   const sessionAvatarUri = useMemo(() => buildAvatarUri(avatarHtmlBase, {
-    compact: '1', host: 'session-panel', session: selectedSessionId, chat_id: avatarConversationId, tts_base: avatarBackendUri,
-  }), [avatarHtmlBase, selectedSessionId, avatarConversationId, avatarBackendUri]);
+    compact: '1', host: 'session-panel', session: selectedSessionId, chat_id: avatarConversationId, tts_base: avatarBackendUri, model_url: avatarModelUri,
+  }), [avatarHtmlBase, selectedSessionId, avatarConversationId, avatarBackendUri, avatarModelUri]);
 
-  // ── Load avatar.html asset ──
+  // ── Load avatar.html + character.glb assets ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const asset = Asset.fromModule(require('../../assets/avatar.html'));
+        const htmlAsset = Asset.fromModule(require('../../assets/avatar.html'));
+        const modelAsset = Asset.fromModule(require('../../assets/character.glb'));
         setAvatarLoadError('');
-        if (asset.localUri || asset.uri) {
-          setAvatarHtmlBase(asset.localUri || asset.uri);
-        }
-        await asset.downloadAsync();
-        const uri = asset.localUri || asset.uri;
+        await Promise.all([htmlAsset.downloadAsync(), modelAsset.downloadAsync()]);
+        const htmlUri = resolvePackagerAssetUri(htmlAsset);
+        const modelUri = resolvePackagerAssetUri(modelAsset);
+        const readAccessUri = getFileUriParentDirectory(htmlAsset.localUri || htmlUri);
         if (!cancelled) {
-          if (uri) {
-            setAvatarHtmlBase(uri);
+          if (htmlUri && modelUri) {
+            setAvatarHtmlBase(htmlUri);
+            setAvatarModelUri(modelUri);
+            setAvatarReadAccessUri(readAccessUri);
           } else {
             setAvatarLoadError(
-              'Avatar asset resolved to no URI. Check metro.config.js has assetExts.push("html") and run `npx expo start --clear`.',
+              'Avatar assets resolved to no URI. Check metro.config.js has assetExts for html and glb, then run `npx expo start --clear`.',
             );
           }
         }
@@ -663,11 +687,32 @@ export default function HomeScreen({ navigation }) {
       .catch(() => {});
   }, []);
 
+  const injectHomeWelcome = useCallback(() => {
+    if (homeWelcomePlayed.current) return;
+    homeWelcomePlayed.current = true;
+    const payload = JSON.stringify({
+      source: 'mindfulness-host',
+      type: 'host-speak-script',
+      text: AVATAR_WELCOME_LINE,
+    });
+    homeDockWebViewRef.current?.injectJavaScript(
+      `(function(){try{window._nativeHostCommand(${payload});}catch(e){}})();true;`
+    );
+  }, []);
+
+  const injectAvatarDone = useCallback(() => {
+    const js = `(function(){try{if(typeof window.onNativeSpeakDone==='function')window.onNativeSpeakDone();}catch(e){}})();true;`;
+    sessionWebViewRef.current?.injectJavaScript(js);
+    homeDockWebViewRef.current?.injectJavaScript(js);
+  }, []);
+
   // ── Handle messages sent from avatar.html via ReactNativeWebView.postMessage ──
   const handleWebViewMessage = useCallback((event) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === 'native-speak') {
+      if (msg.type === 'avatar-model-ready' && msg.host === 'home-dock') {
+        injectHomeWelcome();
+      } else if (msg.type === 'native-speak') {
         // Suspend the WebView AudioContext so iOS doesn't block AVSpeechSynthesizer
         const suspendJs = `(function(){try{if(typeof audioState!=='undefined'&&audioState.ctx&&audioState.ctx.state==='running')audioState.ctx.suspend();}catch(e){}})();true;`;
         sessionWebViewRef.current?.injectJavaScript(suspendJs);
@@ -683,9 +728,9 @@ export default function HomeScreen({ navigation }) {
           Speech.speak(msg.text, {
             rate: 0.9,
             voice: avatarVoiceId.current ?? undefined,
-            onDone: resumeCtx,
-            onStopped: resumeCtx,
-            onError: resumeCtx,
+            onDone: () => { resumeCtx(); injectAvatarDone(); },
+            onStopped: () => { resumeCtx(); injectAvatarDone(); },
+            onError: () => { resumeCtx(); injectAvatarDone(); },
           });
         }, 120);
       } else if (msg.type === 'native-stop-speech') {
@@ -695,7 +740,7 @@ export default function HomeScreen({ navigation }) {
         homeDockWebViewRef.current?.injectJavaScript(resumeJs);
       }
     } catch {}
-  }, []);
+  }, [injectAvatarDone, injectHomeWelcome]);
 
   // ── Inject a postMessage event into the session avatar WebView ──
   // avatar.html listens for { source: 'mindfulness-host', type, ... } on window.
@@ -725,7 +770,10 @@ export default function HomeScreen({ navigation }) {
           }
         }
         const prompt = buildSessionStartPrompt(session, scriptSlideIndex);
-        injectAvatarCommand({ type: 'host-start-session', prompt, announce: false });
+        injectAvatarCommand({
+          type: 'host-speak-script',
+          text: session.kind === 'scripted' ? prompt : `Welcome to ${session.title}. I'm here to guide you. How are you feeling today?`,
+        });
       }, 700);
     }
   }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand]);
@@ -735,18 +783,6 @@ export default function HomeScreen({ navigation }) {
       homeDockWebViewRef.current?.injectJavaScript(HIDE_CONTROLS_JS);
     }, 300);
     homeDockLoadCount.current += 1;
-    if (homeDockLoadCount.current === 1) {
-      // First load only — send the welcome prompt via host-start-session
-      // so it fires once and doesn't re-trigger on any subsequent reload
-      setTimeout(() => {
-        const payload = JSON.stringify({
-          source: 'mindfulness-host', type: 'host-start-session', prompt: null, announce: false,
-        });
-        homeDockWebViewRef.current?.injectJavaScript(
-          `(function(){try{window._nativeHostCommand(${payload});}catch(e){}})();true;`
-        );
-      }, 600);
-    }
   }, []);
 
   // ── Navigation guards ──
@@ -1077,6 +1113,7 @@ export default function HomeScreen({ navigation }) {
           <SessionAvatarPanel
             avatarUri={sessionAvatarUri}
             avatarError={avatarLoadError}
+            avatarReadAccessUri={avatarReadAccessUri}
             webViewRef={sessionWebViewRef}
             onLoad={handleSessionAvatarLoad}
             onError={handleAvatarWebViewError}
@@ -1096,6 +1133,7 @@ export default function HomeScreen({ navigation }) {
       <FloatingAvatarDock
         avatarUri={homeDockUri}
         avatarError={avatarLoadError}
+        avatarReadAccessUri={avatarReadAccessUri}
         expanded={dockExpanded}
         visible={screen === 'home'}
         onToggle={() => setDockExpanded((v) => !v)}

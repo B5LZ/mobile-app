@@ -2000,11 +2000,11 @@ window.jpegDecode=module.exports;})();</script>
   --fh:'Cormorant Garamond',serif;--fb:'DM Sans',sans-serif}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--fb);overflow:hidden}
 .layout{display:grid;grid-template-columns:1fr 410px;height:100vh}
-.scene{position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 20%,#0c1628,#080b12 65%)}
+.scene{position:relative;overflow:hidden;background:linear-gradient(180deg,#e8f2f8 0%,#c8dce8 42%,#a8c4d4 100%)}
 #cv{display:block;width:100%;height:100%}
 .scene::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;
-  background:radial-gradient(ellipse 55% 35% at 50% 55%,rgba(58,111,255,.10) 0%,transparent 70%),
-             radial-gradient(ellipse 35% 25% at 50% 80%,rgba(93,224,165,.06) 0%,transparent 60%)}
+  background:radial-gradient(ellipse 70% 50% at 50% 35%,rgba(255,248,235,.55) 0%,transparent 65%),
+             radial-gradient(ellipse 50% 40% at 50% 85%,rgba(180,210,190,.25) 0%,transparent 70%)}
 .snav{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:14px;
   padding:18px 24px;background:linear-gradient(to bottom,rgba(8,11,18,.9),transparent);z-index:10}
 .back{display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--surface);
@@ -2014,10 +2014,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .stitle{font-family:var(--fh);font-size:22px;font-weight:300;letter-spacing:.03em}
 .stitle em{color:var(--accent);font-style:italic}
 .ast{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);display:flex;
-  align-items:center;gap:8px;padding:8px 18px;background:rgba(8,11,18,.75);
-  border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted);
-  backdrop-filter:blur(10px);z-index:10;transition:all .3s;white-space:nowrap}
-.ast .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:all .3s}
+  align-items:center;gap:10px;padding:10px 20px;background:rgba(8,11,18,.88);
+  border:1px solid rgba(255,255,255,.16);border-radius:999px;font-size:14px;font-weight:600;
+  color:#d7deef;backdrop-filter:blur(10px);z-index:10;transition:all .3s;white-space:nowrap}
+.ast .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);transition:all .3s;flex-shrink:0}
 .ast.speaking .dot{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:dp .9s ease-in-out infinite}
 .ast.speaking{color:var(--text)}
 .ast.thinking .dot{background:#f0b429;box-shadow:0 0 8px #f0b429;animation:dp 1.4s ease-in-out infinite}
@@ -2059,16 +2059,20 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .typ span{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:td 1.2s ease-in-out infinite}
 .typ span:nth-child(2){animation-delay:.18s}.typ span:nth-child(3){animation-delay:.36s}
 @keyframes td{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-5px);opacity:1}}
-.tr{display:flex;align-items:center;gap:8px;padding:8px 14px 6px;font-size:12px;color:var(--muted);flex-shrink:0}
-.tt{position:relative;width:30px;height:17px;flex-shrink:0}
-.tt input{opacity:0;width:0;height:0}
-.ts{position:absolute;inset:0;background:rgba(255,255,255,.10);border-radius:999px;cursor:pointer;transition:background .2s}
-.ts::before{content:'';position:absolute;left:2px;top:2px;width:13px;height:13px;
-  background:#fff;border-radius:50%;transition:transform .2s}
-.tt input:checked+.ts{background:var(--accent)}
-.tt input:checked+.ts::before{transform:translateX(13px)}
+.tr{display:flex;align-items:center;gap:10px;padding:10px 14px 8px;font-size:14px;color:var(--text);flex-shrink:0}
+.voice-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface);color:var(--muted);font-size:14px;
+  font-weight:700;font-family:var(--fb);cursor:pointer;transition:all .2s}
+.voice-btn svg{width:18px;height:18px;flex-shrink:0}
+.voice-btn.on{background:rgba(93,224,165,.14);border-color:rgba(93,224,165,.45);color:#d8f5e8}
+.voice-btn:hover{color:var(--text);border-color:rgba(255,255,255,.22)}
+.tt{position:absolute;opacity:0;pointer-events:none;width:0;height:0;overflow:hidden}
 .cmp{padding:12px 14px 14px;border-top:1px solid var(--border);
-  display:grid;grid-template-columns:1fr auto;gap:10px;flex-shrink:0}
+  display:grid;grid-template-columns:auto 1fr auto;gap:10px;flex-shrink:0}
+.mic{align-self:end;width:48px;height:48px;border-radius:12px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;transition:background .2s,transform .12s;flex-shrink:0}
+.mic:hover{background:rgba(255,255,255,.08)}.mic:active{transform:scale(.93)}.mic:disabled{opacity:.35;cursor:not-allowed}
 .cmp textarea{resize:none;min-height:58px;max-height:110px;background:var(--surface);
   border:1px solid var(--border);border-radius:12px;padding:11px 13px;font-size:14px;
   font-family:var(--fb);color:var(--text);outline:none;transition:border-color .2s}
@@ -2088,22 +2092,39 @@ body.compact .scene{border-bottom:1px solid var(--border)}
 body.compact .snav{padding:12px 14px;background:linear-gradient(to bottom,rgba(8,11,18,.92),rgba(8,11,18,.18))}
 body.compact .back{display:none}
 body.compact .stitle{font-size:18px}
-body.compact .ast{bottom:14px;padding:7px 14px;font-size:11px}
+body.compact .ast{bottom:16px;padding:10px 18px;font-size:14px;color:#e8edf7}
 body.compact .ch{padding:14px 14px 10px}
 body.compact .ch h2{font-size:17px;margin-bottom:2px}
-body.compact .ch p{font-size:11px}
+body.compact .ch p{font-size:12px}
 body.compact .sr{margin-top:10px;flex-wrap:wrap}
 body.compact .sb{padding:7px 12px;font-size:12px}
 body.compact .msgs{padding:12px 12px 8px;gap:10px}
-body.compact .msg{max-width:92%;padding:10px 12px;font-size:13px;line-height:1.48}
-body.compact .tr{padding:6px 12px 4px;font-size:11px}
-body.compact .cmp{padding:10px 12px 12px;gap:8px}
-body.compact .cmp textarea{min-height:52px;max-height:88px;padding:10px 12px;font-size:13px}
-body.compact .snd{width:40px;height:40px;border-radius:10px}
-body.compact .hint{font-size:10px}
+body.compact .msg{max-width:92%;padding:10px 12px;font-size:14px;line-height:1.48}
+body.compact .tr{padding:8px 12px 6px}
+body.compact .voice-btn{padding:9px 14px;font-size:13px}
+body.compact .cmp{padding:12px 12px 14px;gap:10px;grid-template-columns:auto 1fr auto}
+body.compact .cmp textarea{min-height:64px;max-height:110px;padding:12px 14px;font-size:16px;line-height:1.45}
+body.compact .snd{width:48px;height:48px;border-radius:12px}
+body.compact .hint{font-size:12px;line-height:1.4}
 body.compact .lov .ll{font-size:15px}
 body.compact .lov .ls{font-size:11px}
+body.guided .layout{grid-template-columns:1fr!important;grid-template-rows:1fr!important;height:100%!important}
+body.guided .chat{display:none!important}
+body.guided html,body.guided body{height:100%!important;overflow:hidden!important}
+body.guided .scene{border-bottom:none;min-height:0;height:100%!important;background:linear-gradient(180deg,#eef6fa 0%,#d4e6f0 50%,#b8d4e4 100%)}
+body.guided #cv{width:100%!important;height:100%!important;display:block!important}
+body.guided .scene-voice{position:absolute;top:14px;right:14px;z-index:6;padding:0;border:none;background:transparent}
+body.guided .scene-voice .voice-btn{
+  padding:12px 18px;font-size:16px;font-weight:800;border-width:2.5px;min-height:50px;
+  box-shadow:0 4px 16px rgba(31,60,136,.22);background:rgba(255,255,255,.94);color:#1f3c88;
+  border-color:rgba(31,60,136,.35)}
+body.guided .scene-voice .voice-btn.on{
+  background:#e6f5ec;border-color:#2d8a5e;color:#145a32}
+body.guided .scene-voice .voice-btn:not(.on){
+  background:#fff0f0;border-color:#c0392b;color:#922b21}
+body.guided .scene-voice .voice-btn svg{width:20px;height:20px}
 @media(max-width:860px){.layout{grid-template-columns:1fr;grid-template-rows:52vh 1fr}html,body{overflow:hidden}}
+body.guided .layout{grid-template-rows:1fr!important}
 </style>
 </head>
 <body>
@@ -2136,10 +2157,25 @@ body.compact .lov .ls{font-size:11px}
     <div class="msgs" id="msgs"></div>
     <div class="typ" id="typ"><span></span><span></span><span></span></div>
     <div class="tr">
-      <label class="tt"><input type="checkbox" id="ttschk" checked><span class="ts"></span></label>
-      <span>Voice playback</span>
+      <button type="button" class="voice-btn on" id="voiceBtn" aria-pressed="true" aria-label="Voice on">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+          <path d="M19 5a9 9 0 0 1 0 14"/>
+        </svg>
+        <span id="voiceLbl">Voice on</span>
+      </button>
+      <input type="checkbox" id="ttschk" checked hidden>
     </div>
     <div class="cmp">
+      <button type="button" class="mic" id="bmic" aria-label="Speak your message" title="Speak">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 1a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
       <textarea id="inp" placeholder="Start a session to chat…" disabled rows="2"></textarea>
       <button class="snd" id="bsend" disabled>
         <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -2163,6 +2199,7 @@ const CONTROLLED_MODE = queryParams.get('controlled') === '1';
 const SHOULD_AUTOSTART = queryParams.get('autostart') === '1';
 const SESSION_KEY = queryParams.get('session') || '';
 const HOST_KEY = queryParams.get('host') || 'standalone';
+const GUIDED_MODE = queryParams.get('guided') === '1' || HOST_KEY === 'session-panel';
 const SHARED_CHAT_ID = queryParams.get('chat_id') || '';
 const TTS_BASE_URL = queryParams.get('tts_base') || '';
 
@@ -2184,6 +2221,7 @@ const CAMERA_PRESET = CAMERA_PRESETS[HOST_KEY] || CAMERA_PRESETS.standalone;
 
 document.body.classList.toggle('compact', COMPACT_MODE);
 document.body.classList.toggle('controlled', CONTROLLED_MODE);
+document.body.classList.toggle('guided', GUIDED_MODE);
 document.title = COMPACT_MODE ? 'Avatar Guide' : `${SESSION_NAME} Avatar Guide`;
 
 const navTitleEl = document.getElementById('navtitle');
@@ -2197,6 +2235,9 @@ if(COMPACT_MODE){
   if(HOST_KEY==='home-dock'){
     chatHeadingEl.style.display = 'none';
     chatSubtitleEl.style.display = 'none';
+  }else if(GUIDED_MODE){
+    chatHeadingEl.textContent = `${SESSION_NAME} Guide`;
+    chatSubtitleEl.textContent = 'Your guide will walk you through each part of this session.';
   }else{
     chatHeadingEl.textContent = `${SESSION_NAME} Guide`;
     chatSubtitleEl.textContent = 'A compact avatar helper with voice, lip sync, and quick chat.';
@@ -2219,7 +2260,7 @@ function postHostMessage(message){
 }
 
 function getInactivePlaceholder(){
-  if(CONTROLLED_MODE&&HOST_KEY==='session-panel')return 'Press Start Session to begin...';
+  if(GUIDED_MODE)return 'Press Start session above to begin.';
   if(CONTROLLED_MODE&&HOST_KEY==='home-dock')return 'Ask a mindfulness question...';
   return COMPACT_MODE?'Start the chat to begin...':'Start a session to chat…';
 }
@@ -2244,12 +2285,13 @@ const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.outputColorSpace    = THREE.SRGBColorSpace;
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.38;
 renderer.shadowMap.enabled   = true;
 renderer.shadowMap.type      = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog   = new THREE.FogExp2(0x080b12, 0.032);
+scene.background = new THREE.Color(0xd8e8f0);
+scene.fog   = new THREE.FogExp2(0xd8e8f0, 0.014);
 
 const camera = new THREE.PerspectiveCamera(CAMERA_PRESET.fov,1,0.05,100);
 camera.position.set(0,1.65,0.4);
@@ -2263,14 +2305,15 @@ controls.enableDamping=false;
 controls.enabled=false;
 controls.update();
 
-scene.add(new THREE.AmbientLight(0xc8d4ff,0.55));
-const kl=new THREE.DirectionalLight(0xfff8f0,2.8);
-kl.position.set(1.5,3.5,2.5); kl.castShadow=true; kl.shadow.mapSize.setScalar(1024); scene.add(kl);
-const fl=new THREE.DirectionalLight(0x8aaeff,0.9); fl.position.set(-2,2,1.5); scene.add(fl);
-const rl=new THREE.DirectionalLight(0x5de0a5,0.45); rl.position.set(0,1.5,-2.5); scene.add(rl);
-const pl=new THREE.PointLight(0x3a6fff,0.3,5); pl.position.set(0,0.1,0.5); scene.add(pl);
+scene.add(new THREE.AmbientLight(0xfff5eb,0.92));
+const kl=new THREE.DirectionalLight(0xfff4e6,1.35);
+kl.position.set(1.2,3.2,2.8); kl.castShadow=true; kl.shadow.mapSize.setScalar(1024);
+kl.shadow.bias=-0.0008; kl.shadow.radius=4; scene.add(kl);
+const fl=new THREE.DirectionalLight(0xe8f0ff,0.75); fl.position.set(-2.2,2.4,1.8); scene.add(fl);
+const rl=new THREE.DirectionalLight(0xffe8d0,0.35); rl.position.set(0,2,2.5); scene.add(rl);
+const pl=new THREE.PointLight(0xfff0e0,0.22,6); pl.position.set(0,1.8,1.2); scene.add(pl);
 const flr=new THREE.Mesh(new THREE.PlaneGeometry(8,8),
-  new THREE.MeshStandardMaterial({color:0x0b0e18,roughness:.95,metalness:.05}));
+  new THREE.MeshStandardMaterial({color:0xc8d8e4,roughness:.92,metalness:.02}));
 flr.rotation.x=-Math.PI/2; flr.receiveShadow=true; scene.add(flr);
 
 function onResize(){
@@ -2637,15 +2680,137 @@ function finalizeLoadedModel(root, animations){
    TTS
 ========================================================= */
 const ttschk=document.getElementById('ttschk');
-const TTS_VOICE='en-US-AndrewMultilingualNeural';
+const TTS_VOICE=queryParams.get('tts_voice')||'en-US-JennyNeural';
+const TTS_PROVIDER=queryParams.get('tts_provider')||'edge';
+const REMOTE_SERVER='https://multilingual-virtual-assistant.onrender.com';
+const LOCAL_SERVER='http://127.0.0.1:8000';
+function getCurrentOriginServer(){
+  if(window.location.protocol==='http:'||window.location.protocol==='https:'){
+    return window.location.origin;
+  }
+  return '';
+}
+function isUnreachableLanBase(base){
+  if(!base)return false;
+  return /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|localhost|127\.)/i.test(base);
+}
+function buildTtsCandidates(){
+  const isMobile=!!window.ReactNativeWebView;
+  const bases=[];
+  if(TTS_BASE_URL&&!isUnreachableLanBase(TTS_BASE_URL))bases.push(TTS_BASE_URL);
+  bases.push(REMOTE_SERVER);
+  if(!isMobile){
+    bases.push(LOCAL_SERVER);
+    const origin=getCurrentOriginServer();
+    if(origin)bases.push(origin);
+  }
+  return [...new Set(bases.filter(Boolean))];
+}
+const TTS_SERVER_CANDIDATES=buildTtsCandidates();
+const SERVER_CANDIDATES=[getCurrentOriginServer(),LOCAL_SERVER,REMOTE_SERVER].filter(Boolean);
+async function fetchFromCandidates(path, options={}, preferredBases=SERVER_CANDIDATES, timeoutMs=8000){
+  let lastError=null;
+  for(const base of [...new Set(preferredBases)]){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const response=await fetch(base+path,{...options,signal:controller.signal});
+      clearTimeout(timer);
+      if(!response.ok)throw new Error(`${base}${path} -> HTTP ${response.status}`);
+      return response;
+    }catch(error){
+      clearTimeout(timer);
+      lastError=error;
+    }
+  }
+  throw lastError||new Error(`Request failed for ${path}`);
+}
+const ttsCache=new Map();
+async function fetchTtsBuffer(text){
+  const key=(text||'').trim();
+  if(!key)throw new Error('Missing text for TTS');
+  if(ttsCache.has(key)){
+    const hit=ttsCache.get(key);
+    return hit instanceof Promise?await hit:hit;
+  }
+  const job=apiTts(key).then((buf)=>{
+    ttsCache.set(key,buf);
+    return buf;
+  }).catch((err)=>{
+    ttsCache.delete(key);
+    throw err;
+  });
+  ttsCache.set(key,job);
+  return job;
+}
+function prefetchTts(text){
+  const key=(text||'').trim();
+  if(!key||ttsCache.has(key))return;
+  fetchTtsBuffer(key).catch(()=>{});
+}
 let speechToken=0;
+let ttsRequestCounter=0;
+const pendingTtsRequests=new Map();
+window._onNativeTtsAudio=async function(payload){
+  const id=payload&&payload.id;
+  const base64=payload&&payload.base64;
+  const uri=payload&&payload.uri;
+  const pending=id?pendingTtsRequests.get(id):null;
+  if(!pending)return;
+  pendingTtsRequests.delete(id);
+  if(base64){
+    try{
+      const binary=atob(base64);
+      const bytes=new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+      pending.resolve(bytes.buffer);
+      return;
+    }catch(error){
+      pending.reject(error);
+      return;
+    }
+  }
+  if(!uri){pending.reject(new Error('Native TTS failed'));return;}
+  try{
+    const response=await fetch(uri);
+    if(!response.ok)throw new Error(`TTS file HTTP ${response.status}`);
+    pending.resolve(await response.arrayBuffer());
+  }catch(error){
+    pending.reject(error);
+  }
+};
+function apiTtsViaNative(text){
+  return new Promise((resolve,reject)=>{
+    const id=`tts-${++ttsRequestCounter}-${Date.now()}`;
+    pendingTtsRequests.set(id,{resolve,reject});
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type:'tts-fetch',
+      id,
+      text,
+      host:HOST_KEY
+    }));
+    setTimeout(()=>{
+      if(!pendingTtsRequests.has(id))return;
+      pendingTtsRequests.delete(id);
+      reject(new Error('Native TTS timeout'));
+    },45000);
+  });
+}
 async function apiTts(text){
+  if(window.ReactNativeWebView)return apiTtsViaNative(text);
   const r=await fetchFromCandidates('/tts',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({text,voice_name:TTS_VOICE})
-  },TTS_SERVER_CANDIDATES);
+    body:JSON.stringify({text,voice_name:TTS_VOICE,provider:TTS_PROVIDER})
+  },TTS_SERVER_CANDIDATES,12000);
   return await r.arrayBuffer();
+}
+function speakWithNativeFallback(trimmed,token){
+  if(GUIDED_MODE||!window.ReactNativeWebView)return false;
+  setSt('speaking','Speaking…');
+  lipsync.play(trimmed,estimateSpeechDuration(trimmed));
+  window.ReactNativeWebView.postMessage(JSON.stringify({type:'native-speak',text:trimmed}));
+  return true;
 }
 function stopSpeech(status='Listening…'){
   speechToken+=1;
@@ -2661,7 +2826,7 @@ function estimateSpeechDuration(text){
 }
 window.onNativeSpeakDone=function(){
   lipsync.stop();
-  setSt('idle','Listening…');
+  setSt('idle',GUIDED_MODE?'Ready for next part':'Listening…');
 };
 async function speak(text){
   const trimmed=text.trim();
@@ -2671,15 +2836,12 @@ async function speak(text){
   audioState.stop();
   lipsync.stop();
   if(!ttschk.checked){setSt('idle','Listening…');return;}
-  if(window.ReactNativeWebView){
-    setSt('speaking','Speaking…');
-    lipsync.play(trimmed,estimateSpeechDuration(trimmed));
-    window.ReactNativeWebView.postMessage(JSON.stringify({type:'native-speak',text:trimmed}));
-    return;
-  }
   try{
-    setSt('thinking','Generating voice…');
-    const audioBuffer=await apiTts(trimmed);
+    const cached=ttsCache.get(trimmed);
+    const ready=cached&&!(cached instanceof Promise);
+    setSt(ready?'speaking':'thinking',ready?'Speaking…':'Getting ready to speak…');
+    await audioState.prime().catch(()=>{});
+    const audioBuffer=await fetchTtsBuffer(trimmed);
     if(token!==speechToken)return;
     await audioState.playAudio(audioBuffer,{
       onstart:(duration)=>{
@@ -2690,43 +2852,26 @@ async function speak(text){
       onended:()=>{
         if(token!==speechToken)return;
         lipsync.stop();
-        setSt('idle','Listening…');
+        setSt('idle',GUIDED_MODE?'Ready for next part':'Listening…');
+        if(window.ReactNativeWebView){
+          window.ReactNativeWebView.postMessage(JSON.stringify({type:'native-speak-done'}));
+        }
       }
     });
   }catch(err){
     if(token!==speechToken)return;
+    ttsCache.delete(trimmed);
     audioState.stop();
     lipsync.stop();
+    if(speakWithNativeFallback(trimmed,token))return;
     setSt('idle','Voice unavailable. Try again.');
+    console.error('TTS failed:',err);
   }
 }
 
 /* =========================================================
    GEMINI CHAT
 ========================================================= */
-const REMOTE_SERVER='https://multilingual-virtual-assistant.onrender.com';
-const LOCAL_SERVER='http://127.0.0.1:8000';
-function getCurrentOriginServer(){
-  if(window.location.protocol==='http:'||window.location.protocol==='https:'){
-    return window.location.origin;
-  }
-  return '';
-}
-const SERVER_CANDIDATES=[getCurrentOriginServer(),LOCAL_SERVER,REMOTE_SERVER].filter(Boolean);
-const TTS_SERVER_CANDIDATES=[TTS_BASE_URL,LOCAL_SERVER,getCurrentOriginServer(),REMOTE_SERVER].filter(Boolean);
-async function fetchFromCandidates(path, options={}, preferredBases=SERVER_CANDIDATES){
-  let lastError=null;
-  for(const base of [...new Set(preferredBases)]){
-    try{
-      const response=await fetch(base+path,options);
-      if(!response.ok)throw new Error(`${base}${path} -> HTTP ${response.status}`);
-      return response;
-    }catch(error){
-      lastError=error;
-    }
-  }
-  throw lastError||new Error(`Request failed for ${path}`);
-}
 let sid=SHARED_CHAT_ID||null;
 let messageLog=[];
 function getTranscriptStorageKey(){return sid?`mindfulness-avatar-transcript:${sid}`:'';}
@@ -2843,7 +2988,7 @@ function createSessionId(){return window.crypto&&typeof window.crypto.randomUUID
 function setSt(state,text){document.getElementById('ast').className='ast'+(state!=='idle'?' '+state:'');document.getElementById('stxt').textContent=text;}
 function addMsg(role,text){messageLog.push({role,text});persistTranscript();const d=document.createElement('div');d.className='msg '+role;d.textContent=text;msgsEl.appendChild(d);msgsEl.scrollTop=msgsEl.scrollHeight;}
 function setTyp(on){typEl.classList.toggle('on',on);if(on)msgsEl.scrollTop=msgsEl.scrollHeight;}
-function setUi(active){inp.disabled=!active;bsend.disabled=!active;bend.disabled=!active;bstart.disabled=active;inp.placeholder=active?'Type a message…':getInactivePlaceholder();}
+function setUi(active){inp.disabled=!active;bsend.disabled=!active;bmic.disabled=!active;bend.disabled=!active;bstart.disabled=active;inp.placeholder=active?'Type or tap the mic to speak…':getInactivePlaceholder();}
 
 function getScriptedWelcomeText(){
   if(HOST_KEY==='home-dock'){
@@ -2856,8 +3001,8 @@ async function startAvatarSession(options={}){
   const { promptOverride=null, announce=true } = options;
   const hasTranscript=messageLog.length>0;
   if(!sid)sid=SHARED_CHAT_ID||createSessionId();
-  setUi(true);
-  if(!hasTranscript&&announce)addMsg('system',`${SESSION_NAME} session started. Your mindfulness guide is here.`);
+  if(!GUIDED_MODE)setUi(true);
+  if(!GUIDED_MODE&&!hasTranscript&&announce)addMsg('system',`${SESSION_NAME} session started. Your mindfulness guide is here.`);
 
   const scriptedLine=
     (HOST_KEY==='home-dock'&&!promptOverride)?getScriptedWelcomeText():
@@ -2869,7 +3014,12 @@ async function startAvatarSession(options={}){
     return;
   }
 
-  setSt('thinking',HOST_KEY==='home-dock'?'Preparing welcome…':'Thinking…');inp.focus();setTyp(true);
+  if(GUIDED_MODE){
+    setSt('idle','Press Start session to begin.');
+    return;
+  }
+
+  setSt('thinking',HOST_KEY==='home-dock'?'Getting ready…':'Thinking…');inp.focus();setTyp(true);
   const prompt=promptOverride||getInitialWelcomePrompt();
   await replyWithStream(prompt);
 }
@@ -2879,9 +3029,9 @@ async function speakScriptLine(text){
   const trimmed=(text||'').trim();
   if(!trimmed)return;
   if(!sid)sid=SHARED_CHAT_ID||createSessionId();
-  setUi(true);
+  if(!GUIDED_MODE)setUi(true);
   setTyp(false);
-  addMsg('assistant',trimmed);
+  if(!GUIDED_MODE)addMsg('assistant',trimmed);
   await speak(trimmed);
 }
 bstart.addEventListener('click',startAvatarSession);
@@ -2891,20 +3041,25 @@ bend.addEventListener('click',async()=>{
   addMsg('system',s?'Session summary:\n'+s:'Session ended. Take care.');
 });
 async function handleSend(){
+  if(GUIDED_MODE)return;
   const text=inp.value.trim();if(!text||!sid)return;
-  inp.value='';addMsg('user',text);inp.disabled=true;bsend.disabled=true;setTyp(true);setSt('thinking','Thinking…');
+  inp.value='';addMsg('user',text);inp.disabled=true;bsend.disabled=true;bmic.disabled=true;setTyp(true);setSt('thinking','Thinking…');
   await replyWithStream(text);
-  inp.disabled=false;bsend.disabled=false;inp.focus();
+  inp.disabled=false;bsend.disabled=false;bmic.disabled=false;inp.focus();
 }
 
 async function hostEndSession(){
+  stopSpeech('Session ended');
+  setTyp(false);
+  if(GUIDED_MODE){
+    setSt('idle','Session ended');
+    return;
+  }
   if(!sid){
     setUi(Boolean(messageLog.length||HOST_KEY==='home-dock'));
     setSt('idle','Listening…');
     return;
   }
-  stopSpeech('Session concluded');
-  setTyp(false);
   setUi(true);
   setSt('idle','Listening…');
   addMsg('system','Session concluded. You can keep chatting with your mindfulness assistant.');
@@ -2928,6 +3083,7 @@ window.addEventListener('message',event=>{
   }
 
   if(data.type==='host-send-text'){
+    if(GUIDED_MODE)return;
     if(!sid&&data.text){
       startAvatarSession({promptOverride:data.text,announce:false});
       return;
@@ -2939,6 +3095,11 @@ window.addEventListener('message',event=>{
 
   if(data.type==='host-speak-script'){
     speakScriptLine(data.text||'');
+    return;
+  }
+
+  if(data.type==='host-prefetch-tts'){
+    (data.texts||[]).forEach(prefetchTts);
     return;
   }
 
@@ -2957,16 +3118,65 @@ window.addEventListener('message',event=>{
 window._nativeHostCommand=function(cmd){
   if(!cmd||cmd.source!=='mindfulness-host')return;
   if(cmd.type==='host-start-session'){startAvatarSession({promptOverride:cmd.prompt||null,announce:cmd.announce!==false});return;}
-  if(cmd.type==='host-send-text'){if(!sid&&cmd.text){startAvatarSession({promptOverride:cmd.text,announce:false});return;}inp.value=cmd.text||'';handleSend();return;}
+  if(cmd.type==='host-send-text'){if(GUIDED_MODE)return;if(!sid&&cmd.text){startAvatarSession({promptOverride:cmd.text,announce:false});return;}inp.value=cmd.text||'';handleSend();return;}
   if(cmd.type==='host-speak-script'){speakScriptLine(cmd.text||'');return;}
+  if(cmd.type==='host-prefetch-tts'){(cmd.texts||[]).forEach(prefetchTts);return;}
   if(cmd.type==='host-end-session'){hostEndSession();return;}
   if(cmd.type==='host-pause-session'){hostPauseSession();}
 };
 
 bsend.addEventListener('click',()=>{unlockCtx();handleSend();});
 inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();unlockCtx();handleSend();}});
-ttschk.addEventListener('change',()=>{unlockCtx();if(ttschk.checked)audioState.prime().catch(()=>{});else stopSpeech('Listening…');});
-const hasStoredTranscript=restoreTranscript();
+const voiceBtn=document.getElementById('voiceBtn');
+function syncVoiceBtn(){
+  const on=ttschk.checked;
+  voiceBtn.classList.toggle('on',on);
+  voiceBtn.setAttribute('aria-pressed',String(on));
+  const lbl=GUIDED_MODE?(on?'Sound: ON':'Sound: OFF'):(on?'Voice on':'Voice off');
+  voiceBtn.setAttribute('aria-label',lbl);
+  document.getElementById('voiceLbl').textContent=lbl;
+}
+voiceBtn.addEventListener('click',()=>{
+  unlockCtx();
+  ttschk.checked=!ttschk.checked;
+  syncVoiceBtn();
+  if(ttschk.checked)audioState.prime().catch(()=>{});
+  else stopSpeech('Voice off');
+});
+syncVoiceBtn();
+function onHostTtsMessage(event){
+  try{
+    const raw=event&&event.data;
+    if(!raw||typeof raw!=='string')return;
+    const data=JSON.parse(raw);
+    if(data.type==='tts-audio')window._onNativeTtsAudio({id:data.id,base64:data.base64});
+  }catch(e){}
+}
+if(window.ReactNativeWebView){
+  document.addEventListener('message',onHostTtsMessage);
+  window.addEventListener('message',onHostTtsMessage);
+}
+const bmic=document.getElementById('bmic');
+bmic.addEventListener('click',()=>{
+  unlockCtx();
+  if(window.ReactNativeWebView){
+    window.ReactNativeWebView.postMessage(JSON.stringify({type:'native-dictate-hint'}));
+  }
+  if(!inp.disabled){
+    inp.focus();
+    inp.placeholder='Tap the keyboard microphone to speak…';
+  }
+});
+ttschk.addEventListener('change',()=>{unlockCtx();syncVoiceBtn();if(ttschk.checked)audioState.prime().catch(()=>{});else stopSpeech('Voice off');});
+if(GUIDED_MODE){
+  const sceneEl=document.querySelector('.scene');
+  const voiceRow=document.querySelector('.tr');
+  if(sceneEl&&voiceRow){
+    voiceRow.classList.add('scene-voice');
+    sceneEl.appendChild(voiceRow);
+  }
+}
+const hasStoredTranscript=!GUIDED_MODE&&restoreTranscript();
 if(hasStoredTranscript){
   setUi(true);
   setSt('idle','Listening…');

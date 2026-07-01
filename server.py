@@ -13,7 +13,7 @@ from chatbot import (
     find_activity,
     load_mindfulness_activities,
     summarize_history,
-    synthesize_edge_tts,
+    synthesize_tts,
 )
 
 
@@ -329,6 +329,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8"))
             text = payload.get("text", "").strip()
             voice_name = payload.get("voice_name", "").strip() or None
+            provider = payload.get("provider", "").strip() or None
         except json.JSONDecodeError:
             self.send_error(400, "Invalid JSON")
             return
@@ -338,7 +339,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            result = synthesize_edge_tts(text=text, voice=voice_name)
+            result = synthesize_tts(text=text, voice=voice_name, provider=provider)
         except Exception as exc:
             self.send_error(500, f"TTS error: {exc}")
             return

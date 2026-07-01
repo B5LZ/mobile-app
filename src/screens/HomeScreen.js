@@ -9,15 +9,12 @@ import {
 import {
   Alert,
   BackHandler,
-  Dimensions,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,6 +23,7 @@ import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system';
 import * as Speech from 'expo-speech';
 import { auth, db } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
@@ -34,11 +32,94 @@ import { recordCompletedSession } from '../utils/sessionTracking';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_BASE_URL     = 'https://multilingual-virtual-assistant.onrender.com';
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const DOCK_WIDTH           = Math.min(SCREEN_WIDTH - 32, 320);
-const DOCK_HEIGHT          = 480;
-const SESSION_AVATAR_HEIGHT = Math.max(320, Math.round(SCREEN_HEIGHT * 0.62));
+const DOCK_HEIGHT = 480;
+const AVATAR_TTS_SERVER = 'https://multilingual-virtual-assistant.onrender.com';
+const AVATAR_TTS_VOICE = 'en-US-JennyNeural';
+const AVATAR_TTS_PROVIDER = 'edge';
+
+function hashTtsKey(text) {
+  const input = `${AVATAR_TTS_VOICE}|${AVATAR_TTS_PROVIDER}|${(text || '').trim()}`;
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    result += chars[a >> 2];
+    result += chars[((a & 3) << 4) | (b >> 4)];
+    result += i + 1 < bytes.length ? chars[((b & 15) << 2) | (c >> 6)] : '=';
+    result += i + 2 < bytes.length ? chars[c & 63] : '=';
+  }
+  return result;
+}
+
+async function fetchTtsBase64ForText(text, memoryCache) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) throw new Error('Missing TTS text');
+
+  const cacheKey = hashTtsKey(trimmed);
+  if (memoryCache.has(cacheKey)) {
+    return memoryCache.get(cacheKey);
+  }
+
+  const cacheDir = FileSystem.cacheDirectory || '';
+  const filePath = `${cacheDir}tts-${cacheKey}.mp3`;
+
+  try {
+    const info = await FileSystem.getInfoAsync(filePath);
+    if (info.exists && (info.size || 0) > 512) {
+      const fromDisk = await FileSystem.readAsStringAsync(filePath, { encoding: 'base64' });
+      if (fromDisk && fromDisk.length > 512) {
+        memoryCache.set(cacheKey, fromDisk);
+        return fromDisk;
+      }
+      await FileSystem.deleteAsync(filePath, { idempotent: true });
+    }
+  } catch {
+    // Refetch from server if disk cache is unreadable.
+  }
+
+  const response = await fetch(`${AVATAR_TTS_SERVER}/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: trimmed,
+      voice_name: AVATAR_TTS_VOICE,
+      provider: AVATAR_TTS_PROVIDER,
+    }),
+  });
+  if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);
+
+  const buffer = await response.arrayBuffer();
+  if (!buffer || buffer.byteLength < 512) throw new Error('TTS audio too small');
+
+  const base64 = arrayBufferToBase64(buffer);
+  memoryCache.set(cacheKey, base64);
+
+  try {
+    await FileSystem.writeAsStringAsync(filePath, base64, { encoding: 'base64' });
+  } catch {
+    // In-memory cache is enough when disk write fails.
+  }
+
+  return base64;
+}
+
+function deliverTtsToWebView(webViewRef, requestId, base64) {
+  const payload = JSON.stringify({ id: requestId, base64: base64 || null });
+  webViewRef.current?.injectJavaScript(
+    `(function(){try{window._onNativeTtsAudio(${payload});}catch(e){}})();true;`,
+  );
+}
 
 // ─── Session catalog ──────────────────────────────────────────────────────────
 
@@ -109,6 +190,55 @@ const SESSION_SCRIPTS = {
   ],
 };
 
+// Group scripted passages into named parts (matches catalog segment counts).
+const SESSION_CHAPTERS = {
+  'caregiver-fatigue': [
+    { title: 'Settle in', startIndex: 0, endIndex: 4 },
+    { title: 'Empathy & overwhelm', startIndex: 5, endIndex: 7 },
+    { title: 'Caring for someone', startIndex: 8, endIndex: 12 },
+    { title: 'Wider compassion', startIndex: 13, endIndex: 16 },
+    { title: 'Including yourself', startIndex: 17, endIndex: 21 },
+    { title: 'Closing', startIndex: 22, endIndex: 24 },
+  ],
+  'mindful-breathing': [
+    { title: 'Welcome', startIndex: 0, endIndex: 3 },
+    { title: 'Settle & breathe', startIndex: 4, endIndex: 6 },
+    { title: 'Follow your breath', startIndex: 7, endIndex: 8 },
+    { title: 'Wandering mind', startIndex: 9, endIndex: 11 },
+    { title: 'Closing', startIndex: 12, endIndex: 17 },
+  ],
+};
+
+function getSessionChapters(sessionId) {
+  return SESSION_CHAPTERS[sessionId] || [];
+}
+
+function getChapterIndexForSegment(sessionId, segmentIndex) {
+  const chapters = getSessionChapters(sessionId);
+  for (let i = chapters.length - 1; i >= 0; i -= 1) {
+    if (segmentIndex >= chapters[i].startIndex) return i;
+  }
+  return 0;
+}
+
+function getChapterSpeechText(sessionId, chapterIndex) {
+  const chapters = getSessionChapters(sessionId);
+  const segments = SESSION_SCRIPTS[sessionId] || [];
+  const chapter = chapters[chapterIndex];
+  if (!chapter) return '';
+  return segments
+    .slice(chapter.startIndex, chapter.endIndex + 1)
+    .map((segment) => segment.text)
+    .join(' ');
+}
+
+function getAllSessionChapterTexts(sessionId) {
+  const chapters = getSessionChapters(sessionId);
+  return chapters
+    .map((_, index) => getChapterSpeechText(sessionId, index))
+    .filter(Boolean);
+}
+
 // Applied as the injectedJavaScript PROP on every WebView (runs after DOM is ready,
 // before user interaction — more reliable than the injectJavaScript() method):
 //   1. Forces textarea/input font-size to 16px  →  prevents iOS WKWebView auto-zoom
@@ -121,6 +251,11 @@ const WEBVIEW_STATIC_JS = `(function(){try{
     'textarea,input{font-size:16px!important;-webkit-text-size-adjust:none!important}' +
     'body.compact .ch{display:none!important}' +
     'body.compact .layout{grid-template-rows:minmax(160px,40%) 1fr!important}' +
+    'body.guided .chat{display:none!important}' +
+    'body.guided .layout{grid-template-columns:1fr!important;grid-template-rows:1fr!important;height:100%!important}' +
+    'body.guided .scene{border-bottom:none;min-height:100%;height:100%!important}' +
+    'body.guided html,body.guided body{height:100%!important;overflow:hidden!important}' +
+    'body.guided #cv{width:100%!important;height:100%!important;display:block!important}' +
     '@media(max-width:860px){.layout{grid-template-rows:minmax(160px,40%) 1fr!important}}';
   document.head.appendChild(s);
   var vm=document.querySelector('meta[name="viewport"]');
@@ -128,19 +263,37 @@ const WEBVIEW_STATIC_JS = `(function(){try{
   var sr=document.querySelector('.sr');
   if(sr)sr.style.cssText='display:none!important';
   /* Warm up the Render server so TTS isn't slow on first use */
+  setTimeout(function(){try{
+    fetch('https://multilingual-virtual-assistant.onrender.com/health',{method:'GET'}).catch(function(){});
+    fetch('https://multilingual-virtual-assistant.onrender.com/tts',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:'Ready.',voice_name:'en-US-JennyNeural',provider:'edge'})
+    }).catch(function(){});
+  }catch(e){}},1000);
+}catch(e){}})();true;`;
+
+const HOME_WEBVIEW_STATIC_JS = `(function(){try{
+  var s=document.createElement('style');
+  s.textContent=
+    'textarea,input{font-size:16px!important;-webkit-text-size-adjust:none!important}' +
+    'body.compact .ch{display:none!important}' +
+    'body.compact .layout{grid-template-rows:minmax(160px,40%) 1fr!important}' +
+    '@media(max-width:860px){.layout{grid-template-rows:minmax(160px,40%) 1fr!important}}';
+  document.head.appendChild(s);
+  var vm=document.querySelector('meta[name="viewport"]');
+  if(vm)vm.setAttribute('content','width=device-width,initial-scale=1,maximum-scale=1');
+  var sr=document.querySelector('.sr');
+  if(sr)sr.style.cssText='display:none!important';
   setTimeout(function(){try{fetch('https://multilingual-virtual-assistant.onrender.com/health',{method:'GET'}).catch(function(){});}catch(e){}},1000);
 }catch(e){}})();true;`;
 
 // Keep the old name as an alias so existing injectJavaScript() call-sites still compile
 const HIDE_CONTROLS_JS = WEBVIEW_STATIC_JS;
-
-const INITIAL_CHAT_MESSAGE = {
-  id: 'assistant-welcome',
-  role: 'assistant',
-  content: 'Hi, I can answer general mindfulness questions and explain any session tile in the app. Open a session first if you want details about that specific practice.',
-};
+const HIDE_HOME_CONTROLS_JS = HOME_WEBVIEW_STATIC_JS;
 
 const AVATAR_WELCOME_LINE = "Hello. I'm your mindfulness assistant, and I'm here to help. How are you doing today?";
+const PLACEHOLDER_SESSION_LINE = 'This guided session is coming soon. Please choose another session for now.';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -154,56 +307,6 @@ function formatDuration(totalSeconds) {
   const seconds = totalSeconds % 60;
   const parts   = hours > 0 ? [hours, minutes, seconds] : [minutes, seconds];
   return parts.map((v) => String(v).padStart(2, '0')).join(':');
-}
-
-// Build the session avatar start prompt — used on fresh start and on resume
-function buildSessionStartPrompt(session, scriptSlideIndex = 0) {
-  if (session.kind === 'scripted') {
-    const segments = SESSION_SCRIPTS[session.id] || [];
-    const segment  = segments[scriptSlideIndex] || segments[0];
-    if (!segment) return `Welcome to the ${session.title} session.`;
-    return segment.text;
-  }
-
-  return [
-    `You are opening the ${session.title} mindfulness session.`,
-    'Reply with a short, warm welcome only.',
-    'Say you are the user\'s mindfulness assistant and you are here to help.',
-    'Ask how they are doing today.',
-  ].join(' ');
-}
-
-function buildChatPrompt(message, sessionContext) {
-  if (!sessionContext?.selectedSession) {
-    return [
-      'App context: The mobile mindfulness app has 12 selectable session tiles.',
-      'Sessions 1 and 4 have scripted content.',
-      'The other 10 session pages are placeholders for future guided content.',
-      `User message: ${message}`,
-    ].join('\n');
-  }
-  const lines = [
-    'App context: The mobile mindfulness app has 12 selectable session tiles.',
-    `Current session title: ${sessionContext.selectedSession.title}`,
-    `Session status: ${sessionContext.sessionActive ? 'active' : 'not started'}`,
-  ];
-  if (sessionContext.selectedSession.kind === 'scripted') {
-    const segments = SESSION_SCRIPTS[sessionContext.selectedSession.id] || [];
-    lines.push(`This is a scripted session with ${segments.length} passages. Current passage: ${(sessionContext.scriptSlideIndex || 0) + 1}.`);
-  }
-  lines.push(`User message: ${message}`);
-  return lines.join('\n');
-}
-
-function buildLocalChatFallback(_message, sessionContext) {
-  if (sessionContext?.selectedSession?.kind === 'scripted') {
-    const segments = SESSION_SCRIPTS[sessionContext.selectedSession.id] || [];
-    return `${sessionContext.selectedSession.title} is a scripted session with ${segments.length} passages.`;
-  }
-  if (sessionContext?.selectedSession) {
-    return `${sessionContext.selectedSession.title} is currently a placeholder session.`;
-  }
-  return 'This app has 12 session tiles. Sessions 1 and 4 have scripted content; the other 10 session pages are placeholders for future exercises.';
 }
 
 // ─── Avatar URI builder ───────────────────────────────────────────────────────
@@ -275,15 +378,36 @@ function firstNameFromAuthDisplayName(displayName) {
 // Always mounted — opacity:0 + pointerEvents:none when not visible so the
 // WebView keeps running and localStorage / chat state survives screen transitions.
 
-function FloatingAvatarDock({ avatarUri, avatarError, avatarReadAccessUri, expanded, visible, onToggle, webViewRef, onLoad, onMessage, onError }) {
+function FloatingAvatarDock({
+  avatarUri,
+  avatarError,
+  avatarReadAccessUri,
+  expanded,
+  visible,
+  onToggle,
+  webViewRef,
+  onLoad,
+  onMessage,
+  onError,
+  labels,
+}) {
   const hiddenStyle = !visible && styles.floatingHidden;
 
   if (!expanded) {
     return (
-      <View pointerEvents={visible ? 'auto' : 'none'} style={[styles.floatingBtnWrap, hiddenStyle]}>
-        <Pressable style={styles.floatingBtn} onPress={onToggle} accessibilityRole="button" accessibilityLabel="Open avatar guide">
-          <View style={styles.floatingBtnOrb} />
-          <Text style={styles.floatingBtnLabel}>Guide</Text>
+      <View pointerEvents={visible ? 'auto' : 'none'} style={[styles.guideBarWrap, hiddenStyle]}>
+        <Pressable
+          style={({ pressed }) => [styles.guideBar, pressed && styles.btnPressed]}
+          onPress={onToggle}
+          accessibilityRole="button"
+          accessibilityLabel={labels.openGuide}
+        >
+          <View style={styles.guideBarOrb} />
+          <View style={styles.guideBarTextWrap}>
+            <Text style={styles.guideBarTitle}>{labels.barLabel}</Text>
+            <Text style={styles.guideBarAction}>{labels.barAction}</Text>
+          </View>
+          <Text style={styles.guideBarChevron}>›</Text>
         </Pressable>
       </View>
     );
@@ -293,11 +417,11 @@ function FloatingAvatarDock({ avatarUri, avatarError, avatarReadAccessUri, expan
     <View pointerEvents={visible ? 'auto' : 'none'} style={[styles.floatingDock, hiddenStyle]}>
       <View style={styles.floatingDockHeader}>
         <View>
-          <Text style={styles.floatingDockKicker}>Mini Guide</Text>
-          <Text style={styles.floatingDockTitle}>Mindfulness guide</Text>
+          <Text style={styles.floatingDockKicker}>{labels.dockKicker}</Text>
+          <Text style={styles.floatingDockTitle}>{labels.dockTitle}</Text>
         </View>
-        <Pressable onPress={onToggle} hitSlop={10}>
-          <Text style={styles.floatingDockHideText}>Hide</Text>
+        <Pressable onPress={onToggle} hitSlop={10} accessibilityRole="button" accessibilityLabel={labels.hideGuide}>
+          <Text style={styles.floatingDockHideText}>{labels.hideGuide}</Text>
         </Pressable>
       </View>
       {avatarUri ? (
@@ -317,7 +441,7 @@ function FloatingAvatarDock({ avatarUri, avatarError, avatarReadAccessUri, expan
           bounces={false}
           allowsInlineMediaPlayback
           mediaPlaybackRequiresUserAction={false}
-          injectedJavaScript={WEBVIEW_STATIC_JS}
+          injectedJavaScript={HOME_WEBVIEW_STATIC_JS}
           onLoad={onLoad}
           onError={onError}
           onHttpError={onError}
@@ -403,112 +527,6 @@ function SummaryModal({ visible, duration, summary, onClose }) {
   );
 }
 
-// ─── Chat Modal ───────────────────────────────────────────────────────────────
-
-function ChatModal({ visible, onClose, sessionContext }) {
-  const [messages, setMessages] = useState([INITIAL_CHAT_MESSAGE]);
-  const [draft, setDraft]       = useState('');
-  const [busy, setBusy]         = useState(false);
-  const [status, setStatus]     = useState('Ready');
-  const chatSessionId           = useRef(createSessionId()).current;
-  const scrollRef               = useRef(null);
-
-  useEffect(() => {
-    if (visible) setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
-  }, [visible, messages]);
-
-  const send = useCallback(async () => {
-    const trimmed = draft.trim();
-    if (!trimmed || busy) return;
-    setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: trimmed }]);
-    setDraft('');
-    setBusy(true);
-    setStatus('Thinking…');
-    try {
-      const res = await fetch(`${API_BASE_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: buildChatPrompt(trimmed, sessionContext), session_id: chatSessionId }),
-      });
-      if (!res.ok) throw new Error(await res.text() || 'Request failed');
-      const data = await res.json();
-      setMessages((prev) => [...prev, { id: `assistant-${Date.now()}`, role: 'assistant', content: data.reply || '(No response.)' }]);
-      setStatus('Ready');
-    } catch {
-      setMessages((prev) => [...prev, { id: `fallback-${Date.now()}`, role: 'assistant', content: buildLocalChatFallback(trimmed, sessionContext) }]);
-      setStatus('Offline fallback');
-    } finally {
-      setBusy(false);
-    }
-  }, [draft, busy, chatSessionId, sessionContext]);
-
-  return (
-    <Modal visible={visible} transparent animationType="slide">
-      <KeyboardAvoidingView style={styles.overlay} behavior="padding">
-        <Pressable style={styles.overlayDismiss} onPress={onClose}>
-          <Pressable style={styles.chatSheet} onPress={() => {}}>
-            {/* Header */}
-            <View style={styles.sheetHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sheetTitle}>Mindfulness Chat</Text>
-                <Text style={styles.sheetSubtitle}>
-                  {sessionContext?.selectedSession
-                    ? `Context: ${sessionContext.selectedSession.title}`
-                    : 'Context: general app help'}
-                </Text>
-              </View>
-              <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={12}>
-                <Text style={styles.closeBtnText}>✕</Text>
-              </Pressable>
-            </View>
-
-            {/* Status */}
-            <Text style={styles.chatStatus}>Assistant: {status}</Text>
-
-            {/* Messages — tall scrollable area */}
-            <ScrollView
-              ref={scrollRef}
-              style={styles.chatWindow}
-              contentContainerStyle={styles.chatWindowContent}
-              showsVerticalScrollIndicator
-            >
-              {messages.map((msg) => (
-                <View key={msg.id} style={[styles.messageBubble, msg.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}>
-                  <Text style={[styles.messageText, msg.role === 'user' ? styles.messageTextUser : styles.messageTextAssistant]}>
-                    {msg.content}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-
-            {/* Composer */}
-            <View style={styles.composer}>
-              <TextInput
-                style={styles.chatInput}
-                value={draft}
-                onChangeText={setDraft}
-                placeholder="Type a message…"
-                placeholderTextColor={ThemeColor.PLACEHOLDER}
-                editable={!busy}
-                multiline
-                onSubmitEditing={send}
-                returnKeyType="send"
-              />
-              <Pressable
-                style={({ pressed }) => [styles.sendBtn, (!draft.trim() || busy) && styles.btnDisabled, pressed && styles.btnPressed]}
-                onPress={send}
-                disabled={!draft.trim() || busy}
-              >
-                <Text style={styles.sendBtnText}>Send</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
 export default function HomeScreen({ navigation }) {
@@ -530,6 +548,8 @@ export default function HomeScreen({ navigation }) {
   const homeDockLoadCount                         = useRef(0);
   const homeWelcomePlayed                         = useRef(false);
   const avatarVoiceId                             = useRef(null);
+  const ttsBase64Cache                            = useRef(new Map());
+  const ttsInFlight                               = useRef(new Map());
 
   // ── Session state ──
   const [sessionActive, setSessionActive]         = useState(false);
@@ -614,19 +634,47 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   const selectedSession = sessionCatalog.find((s) => s.id === selectedSessionId) || sessionCatalog[0];
-  const sessionContext  = screen === 'session' || sessionActive
-    ? { selectedSession, sessionActive, scriptSlideIndex }
-    : null;
-  const avatarBackendUri = useMemo(() => buildLocalBackendUri(avatarHtmlBase), [avatarHtmlBase]);
-
-  // ── Avatar URIs — same chat_id for shared server-side conversation thread ──
+  const guideLabels = useMemo(() => ({
+    openGuide: t('guideOpen'),
+    hideGuide: t('guideHide'),
+    barLabel: t('guideBarLabel'),
+    barAction: t('guideBarAction'),
+    dockKicker: t('guideDockKicker'),
+    dockTitle: t('guideDockTitle'),
+  }), [t]);
   const homeDockUri = useMemo(() => buildAvatarUri(avatarHtmlBase, {
-    compact: '1', host: 'home-dock', chat_id: avatarConversationId, tts_base: avatarBackendUri, model_url: avatarModelUri,
-  }), [avatarHtmlBase, avatarConversationId, avatarBackendUri, avatarModelUri]);
+    compact: '1', host: 'home-dock', chat_id: avatarConversationId, tts_base: AVATAR_TTS_SERVER, tts_voice: AVATAR_TTS_VOICE, tts_provider: AVATAR_TTS_PROVIDER, model_url: avatarModelUri,
+  }), [avatarHtmlBase, avatarConversationId, avatarModelUri]);
 
   const sessionAvatarUri = useMemo(() => buildAvatarUri(avatarHtmlBase, {
-    compact: '1', host: 'session-panel', session: selectedSessionId, chat_id: avatarConversationId, tts_base: avatarBackendUri, model_url: avatarModelUri,
-  }), [avatarHtmlBase, selectedSessionId, avatarConversationId, avatarBackendUri, avatarModelUri]);
+    compact: '1', guided: '1', host: 'session-panel', session: selectedSessionId, chat_id: avatarConversationId, tts_base: AVATAR_TTS_SERVER, tts_voice: AVATAR_TTS_VOICE, tts_provider: AVATAR_TTS_PROVIDER, model_url: avatarModelUri,
+  }), [avatarHtmlBase, selectedSessionId, avatarConversationId, avatarModelUri]);
+
+  const getTtsBase64 = useCallback(async (text) => {
+    const key = (text || '').trim();
+    if (!key) throw new Error('Missing TTS text');
+    if (ttsInFlight.current.has(key)) return ttsInFlight.current.get(key);
+    const job = fetchTtsBase64ForText(key, ttsBase64Cache.current).finally(() => {
+      ttsInFlight.current.delete(key);
+    });
+    ttsInFlight.current.set(key, job);
+    return job;
+  }, []);
+
+  const prefetchSessionTts = useCallback((sessionId) => {
+    getAllSessionChapterTexts(sessionId).forEach((chapterText) => {
+      getTtsBase64(chapterText).catch(() => {});
+    });
+  }, [getTtsBase64]);
+
+  useEffect(() => {
+    fetch(`${AVATAR_TTS_SERVER}/health`).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'session') return;
+    prefetchSessionTts(selectedSessionId);
+  }, [screen, selectedSessionId, prefetchSessionTts]);
 
   // ── Load avatar.html + character.glb assets ──
   useEffect(() => {
@@ -712,8 +760,20 @@ export default function HomeScreen({ navigation }) {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'avatar-model-ready' && msg.host === 'home-dock') {
         injectHomeWelcome();
+      } else if (msg.type === 'tts-fetch') {
+        const host = msg.host || 'session-panel';
+        const webViewRef = host === 'home-dock' ? homeDockWebViewRef : sessionWebViewRef;
+        void (async () => {
+          try {
+            const base64 = await getTtsBase64(msg.text || '');
+            deliverTtsToWebView(webViewRef, msg.id, base64);
+          } catch (error) {
+            console.warn('TTS fetch failed:', error);
+            deliverTtsToWebView(webViewRef, msg.id, null);
+          }
+        })();
       } else if (msg.type === 'native-speak') {
-        // Suspend the WebView AudioContext so iOS doesn't block AVSpeechSynthesizer
+        // Fallback only when neural API TTS is unavailable in the WebView.
         const suspendJs = `(function(){try{if(typeof audioState!=='undefined'&&audioState.ctx&&audioState.ctx.state==='running')audioState.ctx.suspend();}catch(e){}})();true;`;
         sessionWebViewRef.current?.injectJavaScript(suspendJs);
         homeDockWebViewRef.current?.injectJavaScript(suspendJs);
@@ -726,7 +786,8 @@ export default function HomeScreen({ navigation }) {
         setTimeout(() => {
           Speech.stop();
           Speech.speak(msg.text, {
-            rate: 0.9,
+            rate: 0.92,
+            pitch: 1.0,
             voice: avatarVoiceId.current ?? undefined,
             onDone: () => { resumeCtx(); injectAvatarDone(); },
             onStopped: () => { resumeCtx(); injectAvatarDone(); },
@@ -738,9 +799,14 @@ export default function HomeScreen({ navigation }) {
         const resumeJs = `(function(){try{if(typeof audioState!=='undefined'&&audioState.ctx&&audioState.ctx.state==='suspended')audioState.ctx.resume();}catch(e){}})();true;`;
         sessionWebViewRef.current?.injectJavaScript(resumeJs);
         homeDockWebViewRef.current?.injectJavaScript(resumeJs);
+      } else if (msg.type === 'native-dictate-hint') {
+        Alert.alert(
+          'Speak your message',
+          'Tap the microphone key on your keyboard to dictate, then tap Send.',
+        );
       }
     } catch {}
-  }, [injectAvatarDone, injectHomeWelcome]);
+  }, [getTtsBase64, injectAvatarDone, injectHomeWelcome]);
 
   // ── Inject a postMessage event into the session avatar WebView ──
   // avatar.html listens for { source: 'mindfulness-host', type, ... } on window.
@@ -758,29 +824,25 @@ export default function HomeScreen({ navigation }) {
     setTimeout(() => {
       sessionWebViewRef.current?.injectJavaScript(HIDE_CONTROLS_JS);
     }, 300);
-    if (sessionActive) {
-      setTimeout(() => {
-        const session  = sessionCatalog.find((s) => s.id === selectedSessionId) || sessionCatalog[0];
-        if (session.kind === 'scripted') {
-          const segments = SESSION_SCRIPTS[session.id] || [];
-          const segment  = segments[scriptSlideIndex] || segments[0];
-          if (segment) {
-            injectAvatarCommand({ type: 'host-speak-script', text: segment.text });
-            return;
-          }
+    setTimeout(() => {
+      prefetchSessionTts(selectedSessionId);
+    }, 500);
+    if (!sessionActive) return;
+    setTimeout(() => {
+      const session = sessionCatalog.find((s) => s.id === selectedSessionId) || sessionCatalog[0];
+      if (session.kind === 'scripted') {
+        const chapterIndex = getChapterIndexForSegment(session.id, scriptSlideIndex);
+        const text = getChapterSpeechText(session.id, chapterIndex);
+        if (text) {
+          injectAvatarCommand({ type: 'host-speak-script', text });
         }
-        const prompt = buildSessionStartPrompt(session, scriptSlideIndex);
-        injectAvatarCommand({
-          type: 'host-speak-script',
-          text: session.kind === 'scripted' ? prompt : `Welcome to ${session.title}. I'm here to guide you. How are you feeling today?`,
-        });
-      }, 700);
-    }
-  }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand]);
+      }
+    }, 700);
+  }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand, prefetchSessionTts]);
 
   const handleHomeDockLoad = useCallback(() => {
     setTimeout(() => {
-      homeDockWebViewRef.current?.injectJavaScript(HIDE_CONTROLS_JS);
+      homeDockWebViewRef.current?.injectJavaScript(HIDE_HOME_CONTROLS_JS);
     }, 300);
     homeDockLoadCount.current += 1;
   }, []);
@@ -837,38 +899,41 @@ export default function HomeScreen({ navigation }) {
     setSessionActive(true);
     setSessionStatus('Session active');
     if (session.kind === 'scripted') {
-      setScriptSlideIndex(0);
+      const chapters = getSessionChapters(session.id);
+      setScriptSlideIndex(chapters[0]?.startIndex ?? 0);
     } else {
       setPlaceholderMessage(`${session.title} is intentionally empty right now.`);
     }
+    prefetchSessionTts(session.id);
     setTimeout(() => {
       if (session.kind === 'scripted') {
-        const segments = SESSION_SCRIPTS[session.id] || [];
-        const segment  = segments[0];
-        if (segment) {
-          injectAvatarCommand({ type: 'host-speak-script', text: segment.text });
-          return;
+        const text = getChapterSpeechText(session.id, 0);
+        if (text) {
+          injectAvatarCommand({ type: 'host-speak-script', text });
         }
+        return;
       }
-      const prompt = buildSessionStartPrompt(session, 0);
-      injectAvatarCommand({ type: 'host-start-session', prompt, announce: false });
+      injectAvatarCommand({ type: 'host-speak-script', text: PLACEHOLDER_SESSION_LINE });
     }, 200);
-  }, [selectedSessionId, injectAvatarCommand]);
+  }, [selectedSessionId, injectAvatarCommand, prefetchSessionTts]);
 
   const endSession = useCallback(() => {
     if (!sessionActive) return;
     const elapsed = Math.max(0, Math.floor((Date.now() - (sessionStartTime || Date.now())) / 1000));
     setSessionDuration(formatDuration(elapsed));
     const session = sessionCatalog.find((s) => s.id === selectedSessionId) || sessionCatalog[0];
-    const segments = SESSION_SCRIPTS[session.id] || [];
+    const chapters = getSessionChapters(session.id);
+    const chapterIndex = session.kind === 'scripted'
+      ? getChapterIndexForSegment(session.id, scriptSlideIndex)
+      : 0;
     const completed =
       session.kind !== 'scripted' ||
-      (segments.length > 0 && scriptSlideIndex >= segments.length - 1);
+      (chapters.length > 0 && chapterIndex >= chapters.length - 1);
     setSessionSummary(
       session.kind === 'scripted'
         ? completed
           ? `You completed the full ${session.title} session.`
-          : `You ended ${session.title} after passage ${scriptSlideIndex + 1} of ${segments.length}.`
+          : `You ended ${session.title} after part ${chapterIndex + 1} of ${chapters.length}.`
         : `${session.title} ended.`
     );
     void recordCompletedSession({
@@ -879,7 +944,8 @@ export default function HomeScreen({ navigation }) {
       metadata: {
         kind: session.kind,
         scriptSlideIndex,
-        scriptSegments: segments.length,
+        scriptChapters: chapters.length,
+        scriptChapterIndex: chapterIndex,
       },
     }).catch((error) => {
       console.warn('Failed to record session tracking data', error);
@@ -890,20 +956,24 @@ export default function HomeScreen({ navigation }) {
     setSessionStartTime(null);
     setPlaceholderMessage('');
     setScriptSlideIndex(0);
-    // Tell avatar the session ended — it posts a closing message in chat
     injectAvatarCommand({ type: 'host-end-session' });
   }, [sessionActive, sessionStartTime, selectedSessionId, scriptSlideIndex, injectAvatarCommand]);
 
   const goToNextScriptSegment = useCallback(() => {
-    const segments = SESSION_SCRIPTS[selectedSessionId] || [];
-    if (scriptSlideIndex >= segments.length - 1) {
+    const chapters = getSessionChapters(selectedSessionId);
+    const currentChapter = getChapterIndexForSegment(selectedSessionId, scriptSlideIndex);
+    if (currentChapter >= chapters.length - 1) {
       endSession();
       return;
     }
-    const nextIndex = scriptSlideIndex + 1;
-    setScriptSlideIndex(nextIndex);
-    injectAvatarCommand({ type: 'host-speak-script', text: segments[nextIndex].text });
-  }, [scriptSlideIndex, selectedSessionId, endSession, injectAvatarCommand]);
+    const nextChapter = currentChapter + 1;
+    const nextStart = chapters[nextChapter]?.startIndex ?? scriptSlideIndex + 1;
+    setScriptSlideIndex(nextStart);
+    const text = getChapterSpeechText(selectedSessionId, nextChapter);
+    if (text) injectAvatarCommand({ type: 'host-speak-script', text });
+    const upcoming = getChapterSpeechText(selectedSessionId, nextChapter + 1);
+    if (upcoming) getTtsBase64(upcoming).catch(() => {});
+  }, [scriptSlideIndex, selectedSessionId, endSession, injectAvatarCommand, getTtsBase64]);
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -911,18 +981,18 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={styles.safe} edges={['top']}>
 
       {/* ── Header ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, screen === 'session' && styles.headerCompact]}>
         <View style={styles.langContainer}>
-          <Text style={styles.globeText}>Language</Text>
+          <Text style={[styles.globeText, screen === 'session' && styles.globeTextCompact]}>Language</Text>
           <Pressable
             onPress={toggleLanguage}
-            style={({ pressed }) => [styles.langBtn, pressed && styles.topBtnPressed]}
+            style={({ pressed }) => [styles.langBtn, screen === 'session' && styles.langBtnCompact, pressed && styles.topBtnPressed]}
             accessibilityRole="button"
           >
             <Text style={styles.langBtnText}>{locale.toUpperCase()}</Text>
           </Pressable>
         </View>
-        <Text style={styles.headerTitle}>
+        <Text style={[styles.headerTitle, screen === 'session' && styles.headerTitleCompact]}>
           {t('homeTitle', {
             name: homeGreetingName || t('homeTitleFallbackName'),
           })}
@@ -940,23 +1010,29 @@ export default function HomeScreen({ navigation }) {
       {screen === 'home' && (
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            !dockExpanded && styles.containerWithGuideBar,
+            dockExpanded && styles.containerWithExpandedDock,
+          ]}
           showsVerticalScrollIndicator
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.hero}>
+            <Text style={styles.heroEyebrow}>{t('guideEyebrow')}</Text>
+            <Text style={styles.heroBody}>{t('guideHeroBody')}</Text>
             <View style={styles.heroActions}>
               {!dockExpanded ? (
                 <Pressable style={({ pressed }) => [styles.heroBtnPrimary, pressed && styles.btnPressed]} onPress={() => setDockExpanded(true)}>
-                  <Text style={styles.heroBtnPrimaryText}>Open Guide</Text>
+                  <Text style={styles.heroBtnPrimaryText}>{t('guideOpen')}</Text>
                 </Pressable>
               ) : (
                 <Pressable style={({ pressed }) => [styles.heroBtnPrimary, pressed && styles.btnPressed]} onPress={() => openSession(sessionCatalog[0].id)}>
-                  <Text style={styles.heroBtnPrimaryText}>Start With Caregiver Fatigue</Text>
+                  <Text style={styles.heroBtnPrimaryText}>{t('startCaregiverFatigue')}</Text>
                 </Pressable>
               )}
               <Pressable style={({ pressed }) => [styles.heroBtnSecondary, pressed && styles.btnPressed]} onPress={() => openSession(selectedSessionId)}>
-                <Text style={styles.heroBtnSecondaryText}>Explore Sessions</Text>
+                <Text style={styles.heroBtnSecondaryText}>{t('exploreSessions')}</Text>
               </Pressable>
             </View>
           </View>
@@ -964,28 +1040,34 @@ export default function HomeScreen({ navigation }) {
           {sessionActive && (
             <View style={styles.resumeCard}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.resumeTitle}>Session in progress</Text>
-                <Text style={styles.resumeBody}>{selectedSession.title} is still active.</Text>
+                <Text style={styles.resumeTitle}>{t('sessionInProgress')}</Text>
+                <Text style={styles.resumeBody}>{t('sessionStillActive', { title: selectedSession.title })}</Text>
               </View>
               <Pressable style={({ pressed }) => [styles.heroBtnPrimary, { marginTop: 0 }, pressed && styles.btnPressed]} onPress={() => setScreen('session')}>
-                <Text style={styles.heroBtnPrimaryText}>Resume</Text>
+                <Text style={styles.heroBtnPrimaryText}>{t('resumeSession')}</Text>
               </Pressable>
             </View>
           )}
 
-          <Text style={styles.sectionTitle}>Session Selection</Text>
+          <Text style={styles.sectionTitle}>{t('sessionSectionTitle')}</Text>
           <View style={styles.sessionGrid}>
             {sessionCatalog.map((s) => {
-              const isReady   = s.kind !== 'placeholder';
+              const isAvailable = s.kind !== 'placeholder';
               const selected  = selectedSessionId === s.id;
               const disabled  = sessionActive && selectedSessionId !== s.id;
               const completed = completedSessionIds.has(s.id);
+              const badgeLabel = completed
+                ? t('sessionBadgeCompleted')
+                : isAvailable
+                  ? t('sessionBadgeAvailable')
+                  : t('sessionBadgeComingSoon');
+              const metaLabel = isAvailable ? s.duration : t('sessionDurationComingSoon');
               return (
                 <Pressable
                   key={s.id}
                   style={({ pressed }) => [
                     styles.sessionTile,
-                    isReady ? styles.sessionTileGuided : styles.sessionTilePlaceholder,
+                    isAvailable ? styles.sessionTileGuided : styles.sessionTilePlaceholder,
                     completed && styles.sessionTileCompleted,
                     selected && styles.sessionTileSelected,
                     disabled && styles.btnDisabled,
@@ -1001,7 +1083,7 @@ export default function HomeScreen({ navigation }) {
                         styles.pill,
                         completed
                           ? styles.pillCompleted
-                          : isReady
+                          : isAvailable
                             ? styles.pillGuided
                             : styles.pillEmpty,
                       ]}
@@ -1011,18 +1093,18 @@ export default function HomeScreen({ navigation }) {
                           styles.pillText,
                           completed
                             ? styles.pillTextCompleted
-                            : isReady
+                            : isAvailable
                               ? styles.pillTextGuided
                               : styles.pillTextEmpty,
                         ]}
                       >
-                        {completed ? 'Completed' : isReady ? 'Ready' : 'Empty'}
+                        {badgeLabel}
                       </Text>
                     </View>
                   </View>
                   <Text style={styles.sessionTileTitle}>{s.title}</Text>
-                  {!!s.description && <Text style={styles.sessionTileDesc} numberOfLines={2}>{s.description}</Text>}
-                  <Text style={styles.sessionTileMeta}>{s.duration}</Text>
+                  {!!s.description && <Text style={styles.sessionTileDesc}>{s.description}</Text>}
+                  <Text style={styles.sessionTileMeta}>{metaLabel}</Text>
                 </Pressable>
               );
             })}
@@ -1043,90 +1125,112 @@ export default function HomeScreen({ navigation }) {
         </ScrollView>
       )}
 
-      {/* ══ SESSION SCREEN — fully scrollable so nothing gets compressed ══ */}
+      {/* ══ SESSION SCREEN — single viewport, no scroll ══ */}
       {screen === 'session' && (
-        <ScrollView
-          style={styles.sessionLayout}
-          contentContainerStyle={styles.sessionScrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator
-        >
-          <View style={styles.sessionTopRow}>
-            <Pressable style={({ pressed }) => [styles.backBtn, pressed && styles.btnPressed]} onPress={() => setScreen('home')}>
-              <Text style={styles.backBtnText}>← Sessions</Text>
+        <View style={styles.sessionRoot}>
+          <View style={styles.sessionNavBar}>
+            <Pressable
+              style={({ pressed }) => [styles.sessionBackBtn, pressed && styles.btnPressed]}
+              onPress={() => setScreen('home')}
+              accessibilityRole="button"
+              accessibilityLabel="Back to sessions list"
+            >
+              <Text style={styles.sessionBackBtnText}>← Sessions</Text>
             </Pressable>
             {sessionActive && (
-              <Pressable style={({ pressed }) => [styles.endBtn, pressed && styles.btnPressed]} onPress={endSession}>
+              <Pressable
+                style={({ pressed }) => [styles.endBtn, pressed && styles.btnPressed]}
+                onPress={endSession}
+                accessibilityRole="button"
+              >
                 <Text style={styles.endBtnText}>End Session</Text>
               </Pressable>
             )}
           </View>
 
-          <View style={styles.detailHero}>
-            <View style={styles.detailTopRow}>
-              <Text style={styles.detailNumber}>{selectedSession.number}</Text>
-              <View style={[styles.pill, selectedSession.kind !== 'placeholder' ? styles.pillGuided : styles.pillEmpty]}>
-                <Text style={[styles.pillText, selectedSession.kind !== 'placeholder' ? styles.pillTextGuided : styles.pillTextEmpty]}>
-                  {selectedSession.kind === 'scripted' ? 'Scripted session' : 'Empty session'}
-                </Text>
-              </View>
-              <Text style={styles.detailTitle}>{selectedSession.title}</Text>
-              {!sessionActive ? (
-                <Pressable
-                  style={({ pressed }) => [styles.startBtn, pressed && styles.btnPressed]}
-                  onPress={startSession}
-                >
-                  <Text style={styles.startBtnText}>Start</Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.detailStatus}>{sessionStatus}</Text>
-              )}
-            </View>
-          </View>
-
-          {selectedSession.kind === 'scripted' && sessionActive && (() => {
-            const segments = SESSION_SCRIPTS[selectedSession.id] || [];
-            const total    = segments.length;
-            const current  = Math.min(scriptSlideIndex + 1, total);
-            const pct      = total > 0 ? (current / total) * 100 : 0;
-            const isLast   = scriptSlideIndex >= total - 1;
-            return (
-              <View style={styles.progressCard}>
-                <View style={styles.progressHeader}>
-                  <Text style={styles.progressCount}>{current} / {total}</Text>
-                </View>
-                <View style={styles.progressRow}>
-                  <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${pct}%` }]} />
+          <View style={styles.sessionBody}>
+            <View style={styles.sessionTopSection}>
+              <View style={styles.detailHero}>
+                <View style={styles.detailMetaRow}>
+                  <Text style={styles.detailNumber}>{selectedSession.number}</Text>
+                  <View style={[styles.pill, selectedSession.kind !== 'placeholder' ? styles.pillGuided : styles.pillEmpty]}>
+                    <Text style={[styles.pillText, selectedSession.kind !== 'placeholder' ? styles.pillTextGuided : styles.pillTextEmpty]}>
+                      {selectedSession.kind === 'scripted' ? t('sessionDetailGuided') : t('sessionDetailComingSoon')}
+                    </Text>
                   </View>
-                  <Pressable
-                    style={({ pressed }) => [styles.progressNextBtn, pressed && styles.btnPressed]}
-                    onPress={goToNextScriptSegment}
-                  >
-                    <Text style={styles.startBtnText}>{isLast ? 'Finish' : 'Next →'}</Text>
-                  </Pressable>
+                  {sessionActive && (
+                    <Text style={styles.detailStatus} numberOfLines={1}>{sessionStatus}</Text>
+                  )}
                 </View>
+                <Text style={styles.detailTitle} numberOfLines={sessionActive ? 1 : 2}>
+                  {selectedSession.title}
+                </Text>
+                <Text
+                  style={styles.detailDescription}
+                  numberOfLines={sessionActive ? 1 : 2}
+                  ellipsizeMode="tail"
+                >
+                  {selectedSession.description}
+                </Text>
+                {!sessionActive && selectedSession.kind === 'scripted' && (
+                  <Pressable
+                    style={({ pressed }) => [styles.startBtnFull, pressed && styles.btnPressed]}
+                    onPress={startSession}
+                    accessibilityRole="button"
+                    accessibilityLabel="Start session"
+                  >
+                    <Text style={styles.startBtnFullText}>Start session</Text>
+                  </Pressable>
+                )}
+                {!sessionActive && selectedSession.kind !== 'scripted' && (
+                  <View style={styles.startBtnUnavailable}>
+                    <Text style={styles.startBtnUnavailableText}>{t('sessionDetailComingSoon')}</Text>
+                  </View>
+                )}
               </View>
-            );
-          })()}
 
-          <SessionAvatarPanel
-            avatarUri={sessionAvatarUri}
-            avatarError={avatarLoadError}
-            avatarReadAccessUri={avatarReadAccessUri}
-            webViewRef={sessionWebViewRef}
-            onLoad={handleSessionAvatarLoad}
-            onError={handleAvatarWebViewError}
-            onMessage={handleWebViewMessage}
-          />
-
-          {selectedSession.kind !== 'scripted' && !!placeholderMessage && (
-            <View style={styles.placeholderCard}>
-              <Text style={styles.placeholderTitle}>Template Reserved</Text>
-              <Text style={styles.placeholderBody}>{placeholderMessage}</Text>
+              {selectedSession.kind === 'scripted' && sessionActive && (() => {
+                const chapters = getSessionChapters(selectedSession.id);
+                const total = chapters.length;
+                const currentChapter = getChapterIndexForSegment(selectedSession.id, scriptSlideIndex);
+                const chapter = chapters[currentChapter];
+                const pct = total > 0 ? ((currentChapter + 1) / total) * 100 : 0;
+                const isLast = currentChapter >= total - 1;
+                return (
+                  <View style={styles.progressCard}>
+                    <Text style={styles.progressLabel}>
+                      Part {currentChapter + 1} of {total}
+                    </Text>
+                    {!!chapter?.title && (
+                      <Text style={styles.progressChapterTitle} numberOfLines={1}>{chapter.title}</Text>
+                    )}
+                    <View style={styles.progressTrack}>
+                      <View style={[styles.progressFill, { width: `${pct}%` }]} />
+                    </View>
+                    <Pressable
+                      style={({ pressed }) => [styles.continueBtn, pressed && styles.btnPressed]}
+                      onPress={goToNextScriptSegment}
+                      accessibilityRole="button"
+                      accessibilityLabel={isLast ? 'Finish session' : 'Continue to next part'}
+                    >
+                      <Text style={styles.continueBtnText}>{isLast ? 'Finish session' : 'Continue'}</Text>
+                    </Pressable>
+                  </View>
+                );
+              })()}
             </View>
-          )}
-        </ScrollView>
+
+            <SessionAvatarPanel
+              avatarUri={sessionAvatarUri}
+              avatarError={avatarLoadError}
+              avatarReadAccessUri={avatarReadAccessUri}
+              webViewRef={sessionWebViewRef}
+              onLoad={handleSessionAvatarLoad}
+              onError={handleAvatarWebViewError}
+              onMessage={handleWebViewMessage}
+            />
+          </View>
+        </View>
       )}
 
       {/* ── Floating avatar dock — always mounted, hidden on session screen ── */}
@@ -1141,6 +1245,7 @@ export default function HomeScreen({ navigation }) {
         onLoad={handleHomeDockLoad}
         onError={handleAvatarWebViewError}
         onMessage={handleWebViewMessage}
+        labels={guideLabels}
       />
 
       <SummaryModal
@@ -1165,14 +1270,20 @@ const cardShadow = Platform.select({
 const styles = StyleSheet.create({
   safe:      { flex: 1, backgroundColor: ThemeColor.SCREEN_BG },
   scroll:    { flex: 1 },
-  container: { padding: 16, paddingBottom: 100, maxWidth: 520, width: '100%', alignSelf: 'center' },
+  container: { padding: 16, paddingBottom: 32, maxWidth: 520, width: '100%', alignSelf: 'center' },
+  containerWithGuideBar: { paddingBottom: 100 },
+  containerWithExpandedDock: { paddingBottom: DOCK_HEIGHT + 24 },
 
   // Header
   header:        { backgroundColor: ThemeColor.BRAND, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 14 },
+  headerCompact: { paddingVertical: 8 },
   headerTitle:   { flex: 1, color: ThemeColor.WHITE, fontSize: 18, fontWeight: '700', textAlign: 'center', paddingHorizontal: 8 },
+  headerTitleCompact: { fontSize: 16 },
   langContainer: { width: 92, flexDirection: 'row', alignItems: 'center', gap: 6 },
   globeText:     { color: ThemeColor.WHITE, fontSize: 11, fontWeight: '700' },
+  globeTextCompact: { fontSize: 10 },
   langBtn:       { minWidth: 34, minHeight: 30, alignItems: 'center', justifyContent: 'center', borderRadius: ThemeRadius.SM, backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
+  langBtnCompact:{ minHeight: 28 },
   langBtnText:   { color: ThemeColor.WHITE, fontSize: 13, fontWeight: '700' },
   logoutBtn:     { width: 92, alignItems: 'flex-end', paddingVertical: 6 },
   logoutText:    { color: ThemeColor.WHITE, fontWeight: '700', fontSize: 14 },
@@ -1193,22 +1304,41 @@ const styles = StyleSheet.create({
   resumeTitle: { fontSize: 14, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY, marginBottom: 2 },
   resumeBody:  { fontSize: 13, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 18 },
 
-  // ── Floating dock (home screen) ──
-  floatingBtnWrap: { position: 'absolute', bottom: 28, right: 18, zIndex: 200 },
-  floatingBtn: {
-    width: 64, height: 64, borderRadius: 32, backgroundColor: ThemeColor.BRAND,
-    alignItems: 'center', justifyContent: 'center', gap: 4,
+  // ── Guide bar (home screen, collapsed) ──
+  guideBarWrap: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 200,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: 8,
+  },
+  guideBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: ThemeColor.BRAND,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    minHeight: 56,
     ...Platform.select({
-      ios:     { shadowColor: '#0f172a', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12 },
+      ios:     { shadowColor: '#0f172a', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 12 },
       android: { elevation: 8 },
     }),
   },
-  floatingBtnOrb:   { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.85)' },
-  floatingBtnLabel: { color: ThemeColor.WHITE, fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
+  guideBarOrb:        { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.9)' },
+  guideBarTextWrap:   { flex: 1 },
+  guideBarTitle:      { color: ThemeColor.WHITE, fontSize: 16, fontWeight: '800' },
+  guideBarAction:     { color: 'rgba(255,255,255,0.82)', fontSize: 13, marginTop: 2 },
+  guideBarChevron:    { color: ThemeColor.WHITE, fontSize: 28, fontWeight: '300', lineHeight: 28 },
 
   floatingDock: {
-    position: 'absolute', bottom: 28, right: 16,
-    width: DOCK_WIDTH, height: DOCK_HEIGHT,
+    position: 'absolute', bottom: 12, right: 16, left: 16,
+    width: undefined,
+    height: DOCK_HEIGHT,
     borderRadius: 18, overflow: 'hidden', backgroundColor: '#0d1b36', zIndex: 200,
     ...Platform.select({
       ios:     { shadowColor: '#0f172a', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 18 },
@@ -1228,30 +1358,30 @@ const styles = StyleSheet.create({
   loadingText:       { color: 'rgba(255,255,255,0.85)', fontSize: 13, textAlign: 'center' },
   loadingDetailText: { color: 'rgba(255,255,255,0.5)', fontSize: 10, textAlign: 'center' },
 
-  // ── Session avatar (inline) ──
-  sessionAvatarPanel: { height: SESSION_AVATAR_HEIGHT, borderRadius: 18, overflow: 'hidden', marginBottom: 16, backgroundColor: '#0d1b36', ...cardShadow },
-  sessionWebView:     { flex: 1, backgroundColor: '#0d1b36' },
+  // ── Session avatar (fills remaining viewport) ──
+  sessionAvatarPanel: { flex: 1, minHeight: 0, borderRadius: 16, overflow: 'hidden', marginTop: 6, backgroundColor: '#0d1b36', ...cardShadow },
+  sessionWebView:     { flex: 1, width: '100%', backgroundColor: '#0d1b36' },
 
   // Session grid
   sectionTitle:           { fontSize: 20, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY, marginBottom: 12, marginTop: 4 },
-  sessionGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
-  sessionTile:            { width: (SCREEN_WIDTH - 42) / 2, borderRadius: 14, padding: 14, gap: 6, borderWidth: 1.5, minHeight: 140 },
+  sessionGrid:            { gap: 10, marginBottom: 20 },
+  sessionTile:            { width: '100%', borderRadius: 14, padding: 16, gap: 8, borderWidth: 1.5 },
   sessionTileGuided:      { backgroundColor: '#e8edf7', borderColor: 'rgba(31,60,136,0.2)' },
   sessionTilePlaceholder: { backgroundColor: ThemeColor.WHITE, borderColor: 'rgba(31,60,136,0.1)' },
   sessionTileCompleted:   { backgroundColor: '#dcfce7', borderColor: '#16a34a' },
   sessionTileSelected:    { borderColor: ThemeColor.BRAND, borderWidth: 2 },
   sessionTileTop:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sessionNumber:          { fontSize: 20, fontWeight: '900', color: ThemeColor.BRAND },
-  sessionTileTitle:       { fontSize: 14, fontWeight: '700', color: ThemeColor.TEXT_PRIMARY },
-  sessionTileDesc:        { fontSize: 12, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 17 },
-  sessionTileMeta:        { fontSize: 11, color: ThemeColor.HOME_SUBTITLE, fontWeight: '600' },
+  sessionTileTitle:       { fontSize: 16, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY, lineHeight: 22 },
+  sessionTileDesc:        { fontSize: 14, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 21 },
+  sessionTileMeta:        { fontSize: 13, color: ThemeColor.HOME_SUBTITLE, fontWeight: '600' },
 
   // Pills
   pill:              { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   pillGuided:        { backgroundColor: ThemeColor.BRAND },
   pillEmpty:         { backgroundColor: '#e8edf7' },
   pillCompleted:     { backgroundColor: '#16a34a' },
-  pillText:          { fontSize: 10, fontWeight: '800' },
+  pillText:          { fontSize: 11, fontWeight: '800' },
   pillTextGuided:    { color: ThemeColor.WHITE },
   pillTextEmpty:     { color: ThemeColor.HOME_SUBTITLE },
   pillTextCompleted: { color: ThemeColor.WHITE },
@@ -1261,36 +1391,99 @@ const styles = StyleSheet.create({
   cardTitle:     { fontSize: 18, fontWeight: '700', color: ThemeColor.BRAND, marginBottom: 5 },
   cardText:      { color: ThemeColor.HOME_CARD_TEXT, lineHeight: 22 },
 
-  // Session screen — single scrollable column, nothing gets compressed
-  sessionLayout:       { flex: 1, backgroundColor: ThemeColor.SCREEN_BG },
-  sessionScrollContent:{ padding: 16, paddingBottom: 100 },
+  // Session screen — fixed viewport, no scroll
+  sessionRoot: {
+    flex: 1,
+    overflow: 'hidden',
+    backgroundColor: ThemeColor.SCREEN_BG,
+  },
+  sessionNavBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: ThemeColor.SCREEN_BG,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    minHeight: 44,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(31,60,136,0.12)',
+  },
+  sessionBackBtn: {
+    minHeight: 44,
+    minWidth: 140,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
+  sessionBackBtnText: {
+    color: ThemeColor.BRAND,
+    fontWeight: '800',
+    fontSize: 17,
+  },
+  sessionBody: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 4,
+    overflow: 'hidden',
+  },
+  sessionTopSection: {
+    flexShrink: 0,
+  },
 
-  // Session screen
-  sessionTopRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  backBtn:          { paddingVertical: 6 },
-  backBtnText:      { color: ThemeColor.BRAND, fontWeight: '700', fontSize: 15 },
-  endBtn:           { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(180,40,40,0.35)', backgroundColor: 'rgba(220,50,50,0.06)' },
-  endBtnText:       { color: '#c0392b', fontWeight: '700', fontSize: 13 },
-  startBtn:         { backgroundColor: ThemeColor.BRAND, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 14, marginLeft: 'auto' },
-  startBtnText:     { color: ThemeColor.WHITE, fontWeight: '800', fontSize: 13 },
-  detailHero:       { backgroundColor: ThemeColor.WHITE, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 10, ...cardShadow },
-  detailTopRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  detailNumber:     { fontSize: 28, fontWeight: '900', color: ThemeColor.BRAND },
-  detailStatus:     { fontSize: 11, color: ThemeColor.HOME_SUBTITLE, fontWeight: '600', marginLeft: 'auto' },
-  detailTitle:      { flex: 1, fontSize: 16, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY },
-  detailDescription:{ fontSize: 14, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 21 },
+  endBtn:           { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1.5, borderColor: 'rgba(180,40,40,0.4)', backgroundColor: 'rgba(220,50,50,0.08)', minHeight: 44, justifyContent: 'center' },
+  endBtnText:       { color: '#c0392b', fontWeight: '800', fontSize: 14 },
+  detailHero:       { backgroundColor: ThemeColor.WHITE, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 6, gap: 8, ...cardShadow },
+  detailMetaRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  detailNumber:     { fontSize: 26, fontWeight: '900', color: ThemeColor.BRAND },
+  detailStatus:     { fontSize: 13, color: ThemeColor.HOME_SUBTITLE, fontWeight: '700', marginLeft: 'auto', flexShrink: 1 },
+  detailTitle:      { fontSize: 20, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY, lineHeight: 26 },
+  detailDescription:{ fontSize: 17, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 24 },
+  startBtnFull: {
+    backgroundColor: ThemeColor.BRAND,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    width: '100%',
+    marginTop: 2,
+  },
+  startBtnFullText: {
+    color: ThemeColor.WHITE,
+    fontWeight: '800',
+    fontSize: 19,
+    letterSpacing: 0.2,
+  },
+  startBtnUnavailable: {
+    backgroundColor: '#eef1f7',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    width: '100%',
+    marginTop: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(31,60,136,0.12)',
+  },
+  startBtnUnavailableText: {
+    color: ThemeColor.HOME_SUBTITLE,
+    fontWeight: '800',
+    fontSize: 17,
+  },
 
   placeholderCard:  { backgroundColor: ThemeColor.WHITE, borderRadius: 16, padding: 18, gap: 8, marginBottom: 16, ...cardShadow },
   placeholderTitle: { fontSize: 17, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY },
   placeholderBody:  { fontSize: 14, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 21 },
-  progressCard:     { backgroundColor: ThemeColor.WHITE, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 10, ...cardShadow },
-  progressHeader:   { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 6 },
-  progressLabel:    { fontSize: 13, fontWeight: '700', color: ThemeColor.TEXT_PRIMARY },
-  progressCount:    { fontSize: 13, fontWeight: '800', color: ThemeColor.BRAND },
-  progressRow:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  progressTrack:    { flex: 1, height: 8, borderRadius: 4, backgroundColor: 'rgba(31,60,136,0.12)', overflow: 'hidden' },
+  progressCard:     { backgroundColor: ThemeColor.WHITE, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6, gap: 6, ...cardShadow },
+  progressLabel:    { fontSize: 16, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY },
+  progressChapterTitle: { fontSize: 14, fontWeight: '600', color: ThemeColor.BRAND, lineHeight: 20 },
+  progressTrack:    { height: 8, borderRadius: 4, backgroundColor: 'rgba(31,60,136,0.12)', overflow: 'hidden' },
   progressFill:     { height: '100%', backgroundColor: ThemeColor.BRAND, borderRadius: 4 },
-  progressNextBtn:  { backgroundColor: ThemeColor.BRAND, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 14 },
+  continueBtn:      { backgroundColor: ThemeColor.BRAND, borderRadius: 12, paddingVertical: 12, alignItems: 'center', minHeight: 48, justifyContent: 'center' },
+  continueBtnText:  { color: ThemeColor.WHITE, fontWeight: '800', fontSize: 17 },
 
   // Summary modal
   overlay:             { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -1300,38 +1493,6 @@ const styles = StyleSheet.create({
   summaryBody:         { fontSize: 15, color: ThemeColor.TEXT_PRIMARY, lineHeight: 22 },
   summaryCloseBtn:     { backgroundColor: ThemeColor.BRAND, borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 8 },
   summaryCloseBtnText: { color: ThemeColor.WHITE, fontWeight: '800', fontSize: 15 },
-
-  // Chat modal — tall sheet so messages and composer are both visible
-  overlayDismiss:  { flex: 1, justifyContent: 'flex-end' },
-  chatSheet: {
-    backgroundColor: ThemeColor.WHITE,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    height: Math.round(SCREEN_HEIGHT * 0.82),
-    width: '100%',
-    maxWidth: 600,
-    alignSelf: 'center',
-  },
-  sheetHeader:  { flexDirection: 'row', alignItems: 'flex-start', padding: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: ThemeColor.INPUT_BORDER },
-  sheetTitle:   { fontSize: 18, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY },
-  sheetSubtitle:{ fontSize: 13, color: ThemeColor.HOME_CARD_TEXT, marginTop: 2 },
-  closeBtn:     { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
-  closeBtnText: { fontSize: 16, color: ThemeColor.TEXT_PRIMARY, fontWeight: '700' },
-  chatStatus:   { fontSize: 11, color: ThemeColor.HOME_CHAT_MUTED, paddingHorizontal: 16, paddingVertical: 5, backgroundColor: '#f7f8fa' },
-  // Messages area — flex:1 so it fills remaining space between header and composer
-  chatWindow:        { flex: 1 },
-  chatWindowContent: { padding: 16, gap: 12, flexGrow: 1 },
-  messageBubble:     { borderRadius: 16, padding: 13, maxWidth: '86%' },
-  bubbleUser:        { backgroundColor: ThemeColor.BRAND, alignSelf: 'flex-end' },
-  bubbleAssistant:   { backgroundColor: '#e8edf7', alignSelf: 'flex-start' },
-  messageText:           { fontSize: 15, lineHeight: 21 },
-  messageTextUser:       { color: ThemeColor.WHITE },
-  messageTextAssistant:  { color: ThemeColor.TEXT_PRIMARY },
-  // Composer — fixed at bottom
-  composer:  { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, gap: 10, borderTopWidth: 1, borderTopColor: ThemeColor.INPUT_BORDER, backgroundColor: ThemeColor.WHITE },
-  chatInput: { flex: 1, backgroundColor: ThemeColor.INPUT_BG, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, color: ThemeColor.TEXT_PRIMARY, minHeight: 46, maxHeight: 120 },
-  sendBtn:     { backgroundColor: ThemeColor.BRAND, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 18, minHeight: 46, justifyContent: 'center' },
-  sendBtnText: { color: ThemeColor.WHITE, fontWeight: '800', fontSize: 15 },
 
   // Shared
   btnDisabled:   { opacity: 0.4 },

@@ -1,4 +1,5 @@
 trafilatura
 google-generativeai
+google-cloud-texttospeech
 python-dotenv
 edge-tts

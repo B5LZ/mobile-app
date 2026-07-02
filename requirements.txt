@@ -3,3 +3,4 @@ google-generativeai
 google-cloud-texttospeech
 python-dotenv
 edge-tts
+azure-cognitiveservices-speech

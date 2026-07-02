@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -344,10 +345,15 @@ class ChatHandler(SimpleHTTPRequestHandler):
             self.send_error(500, f"TTS error: {exc}")
             return
 
-        send_bytes(
+        send_json(
             self,
-            payload=result["audio_bytes"],
-            content_type=result["content_type"],
+            {
+                "audio": base64.b64encode(result["audio_bytes"]).decode("ascii"),
+                "audio_content_type": result.get("content_type", "audio/mpeg"),
+                "visemes": result.get("visemes", []),
+                "voice_name": result.get("voice_name"),
+                "provider": result.get("provider"),
+            },
         )
 
     def handle_activity_select(self):

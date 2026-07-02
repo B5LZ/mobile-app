@@ -2190,6 +2190,7 @@ body.guided .layout{grid-template-rows:1fr!important}
 <script type="module">
 import * as THREE        from 'three';
 import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { RGBELoader }    from 'three/addons/loaders/RGBELoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -2213,9 +2214,9 @@ function formatSessionName(value){
 
 const SESSION_NAME = formatSessionName(SESSION_KEY) || 'Mindfulness';
 const CAMERA_PRESETS = {
-  'home-dock': {faceDistance: 0.95, eyeOffset: 0.02, fov: 31, scale: 2.18, lookHeight: 0.895},
-  'session-panel': {faceDistance: 1.02, eyeOffset: 0.02, fov: 32, scale: 2.06, lookHeight: 0.895},
-  standalone: {faceDistance: 1.08, eyeOffset: 0.02, fov: 33, scale: 2, lookHeight: 0.895}
+  'home-dock': {faceDistance: 0.78, eyeOffset: 0.02, fov: 31, scale: 2.18, lookHeight: 0.91},
+  'session-panel': {faceDistance: 0.84, eyeOffset: 0.02, fov: 32, scale: 2.06, lookHeight: 0.91},
+  standalone: {faceDistance: 0.92, eyeOffset: 0.02, fov: 33, scale: 2, lookHeight: 0.91}
 };
 const CAMERA_PRESET = CAMERA_PRESETS[HOST_KEY] || CAMERA_PRESETS.standalone;
 
@@ -2276,6 +2277,7 @@ function getInitialWelcomePrompt(){
    MODEL URL — passed from the host app (Expo asset URI)
 ========================================================= */
 const MODEL_URL = queryParams.get('model_url') || '';
+const ENV_URL = queryParams.get('env_url') || '';
 
 /* =========================================================
    THREE.JS SCENE
@@ -2285,7 +2287,7 @@ const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.outputColorSpace    = THREE.SRGBColorSpace;
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.38;
+renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled   = true;
 renderer.shadowMap.type      = THREE.PCFSoftShadowMap;
 
@@ -2316,6 +2318,27 @@ const flr=new THREE.Mesh(new THREE.PlaneGeometry(8,8),
   new THREE.MeshStandardMaterial({color:0xc8d8e4,roughness:.92,metalness:.02}));
 flr.rotation.x=-Math.PI/2; flr.receiveShadow=true; scene.add(flr);
 
+async function loadEnvironmentMap(){
+  if(!ENV_URL)return;
+  try{
+    const response=await fetch(ENV_URL);
+    if(!response.ok)throw new Error('HTTP '+response.status+' '+response.statusText);
+    const buffer=await response.arrayBuffer();
+    const blobUrl=URL.createObjectURL(new Blob([buffer]));
+    const texture=await new Promise((resolve,reject)=>{
+      new RGBELoader().load(blobUrl,(map)=>{
+        URL.revokeObjectURL(blobUrl);
+        map.mapping=THREE.EquirectangularReflectionMapping;
+        resolve(map);
+      },undefined,reject);
+    });
+    scene.environment=texture;
+  }catch(err){
+    console.warn('Environment map load failed:',err);
+  }
+}
+void loadEnvironmentMap();
+
 function onResize(){
   const w=canvas.parentElement.clientWidth, h=canvas.parentElement.clientHeight;
   renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix();
@@ -2329,6 +2352,43 @@ const morphRefs={}, morphCur={};
 let mixer=null;
 function writeMorph(n,v){for(const{mesh,dict}of Object.values(morphRefs)){const i=dict[n];if(i!==undefined)mesh.morphTargetInfluences[i]=v;}}
 function lerpMorph(n,t,a){const c=morphCur[n]??0,x=c+(t-c)*Math.min(1,a);morphCur[n]=x;writeMorph(n,x);}
+function hasFaceMorphs(){
+  for(const{dict}of Object.values(morphRefs)){
+    if(dict.mouthOpen!==undefined||dict.viseme_aa!==undefined||dict.viseme_PP!==undefined)return true;
+  }
+  return false;
+}
+
+/* =========================================================
+   BONE LIPSYNC — fallback when the model has no face morphs
+========================================================= */
+let avatarRoot=null;
+const boneSpeech={
+  head:null,neck:null,restHead:null,restNeck:null,smoothed:0,axisX:new THREE.Vector3(1,0,0),
+  bind(root){
+    this.head=findSkeletonBone(root,'Head');
+    this.neck=findSkeletonBone(root,'Neck');
+    this.restHead=this.head?this.head.quaternion.clone():null;
+    this.restNeck=this.neck?this.neck.quaternion.clone():null;
+    this.smoothed=0;
+  },
+  update(open,dt){
+    if(!this.head||!this.restHead)return;
+    this.smoothed+=(open-this.smoothed)*Math.min(1,14*dt);
+    const jaw=this.smoothed*0.85;
+    const headQ=new THREE.Quaternion().copy(this.restHead);
+    headQ.multiply(new THREE.Quaternion().setFromAxisAngle(this.axisX,-jaw));
+    this.head.quaternion.copy(headQ);
+    if(this.neck&&this.restNeck){
+      const neckQ=new THREE.Quaternion().copy(this.restNeck);
+      neckQ.multiply(new THREE.Quaternion().setFromAxisAngle(this.axisX,-jaw*.12));
+      this.neck.quaternion.copy(neckQ);
+    }
+    if(avatarRoot){
+      avatarRoot.traverse(obj=>{if(obj.isSkinnedMesh&&obj.skeleton)obj.skeleton.update();});
+    }
+  }
+};
 
 /* =========================================================
    IDLE — blink + eye drift
@@ -2336,7 +2396,7 @@ function lerpMorph(n,t,a){const c=morphCur[n]??0,x=c+(t-c)*Math.min(1,a);morphCu
 const idle={
   bT:0,bI:3.2+Math.random()*2,bP:'open',bt:0,dX:0,dY:0,dTX:0,dTY:0,dTim:0,
   update(dt){
-    if(!morphRefs['Head_Mesh'])return;
+    if(!hasFaceMorphs())return;
     this.bT+=dt;
     if(this.bT>this.bI&&this.bP==='open'){this.bP='closing';this.bt=0;this.bT=0;this.bI=2.2+Math.random()*3.2;}
     if(this.bP==='closing'){this.bt+=dt/.07;const v=Math.min(this.bt,1);writeMorph('eyeBlinkLeft',v);writeMorph('eyeBlinkRight',v);if(v>=1){this.bP='opening';this.bt=0;}}
@@ -2360,6 +2420,13 @@ const V_OPEN={sil:.00,PP:.00,FF:.05,TH:.10,DD:.25,kk:.28,CH:.18,SS:.06,nn:.20,RR
 const VISEME_STRENGTH=.85;
 const MOUTH_SCALE=.72;
 const JAW_SCALE=.28;
+/* Azure Speech SDK viseme IDs (0-21) -> Ready Player Me Oculus blendshapes */
+const AZURE_TO_RPM={
+  0:'sil',1:'aa',2:'aa',3:'O',4:'E',5:'RR',6:'I',7:'U',8:'O',9:'aa',
+  10:'O',11:'aa',12:'sil',13:'RR',14:'nn',15:'SS',16:'CH',17:'FF',18:'TH',19:'DD',20:'kk',21:'PP'
+};
+const RPM_BLENDSHAPES=['mouthOpen','jawOpen',...ALL_V.map((v)=>'viseme_'+v)];
+function rpmVisemeForAzure(id){return AZURE_TO_RPM[id]||'sil';}
 function charDur(ch){
   if('aeiou'.includes(ch))return .082;
   if('y'.includes(ch))return .074;
@@ -2368,7 +2435,7 @@ function charDur(ch){
   if('cdgkqtw'.includes(ch))return .058;
   return .062;
 }
-function buildTL(text,totalDuration=0){
+function buildTextTimeline(text,totalDuration=0){
   const tl=[];let t=0;
   for(let i=0;i<text.length;i++){
     const raw=text[i],ch=raw.toLowerCase();
@@ -2386,7 +2453,7 @@ function buildTL(text,totalDuration=0){
   }
   return out;
 }
-const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
+const audioState={ctx:null,analyser:null,data:null,src:null,active:false,playStartCtxTime:0,
   async prime(){
     const Ctx=window.AudioContext||window.webkitAudioContext;
     if(!Ctx)throw new Error('Web Audio is not supported in this browser.');
@@ -2409,6 +2476,11 @@ const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
       this.src=null;
     }
     this.active=false;
+    this.playStartCtxTime=0;
+  },
+  getPlaybackTimeMs(){
+    if(!this.active||!this.ctx||!this.playStartCtxTime)return 0;
+    return Math.max(0,(this.ctx.currentTime-this.playStartCtxTime)*1000);
   },
   async playAudio(arrayBuffer,{onstart,onended}={}){
     const ctx=await this.prime();
@@ -2421,12 +2493,15 @@ const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
       if(this.src!==src)return;
       this.src=null;
       this.active=false;
+      this.playStartCtxTime=0;
       if(onended)onended();
     };
     this.src=src;
+    const startAt=ctx.currentTime+0.02;
+    this.playStartCtxTime=startAt;
     this.active=true;
+    src.start(startAt);
     if(onstart)onstart(decoded.duration);
-    src.start(0);
     return decoded.duration;
   },
   getLevels(){
@@ -2444,31 +2519,93 @@ const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
     };
   }
 };
-const lipsync={active:false,tl:[],t0:0,energy:0,brightness:0,
-  play(tx,totalDuration=0){this.tl=buildTL(tx,totalDuration);this.t0=performance.now()/1000;this.active=true;},
-  stop(){this.active=false;this.tl=[];},
-  elapsed(now=performance.now()/1000){return now-this.t0;},
-  update(dt){
-    let cur='sil';
-    if(this.active){
-      const e=this.elapsed(),last=this.tl.at(-1);
-      if(last&&e>last.s+last.d+.24&&!audioState.active)this.stop();
-      else for(const ev of this.tl)if(e>=ev.s&&e<ev.s+ev.d){cur=ev.v;break;}
+const lipsync={
+  active:false,
+  visemes:[],
+  textTimeline:[],
+  useTimeline:false,
+  targets:{},
+  startVisemeTimeline(visemes){
+    this.visemes=Array.isArray(visemes)?visemes.slice().sort((a,b)=>a.audio_offset-b.audio_offset):[];
+    this.textTimeline=[];
+    this.useTimeline=this.visemes.length>0;
+    this.active=true;
+    this.targets={};
+  },
+  playTextFallback(tx,totalDuration=0){
+    this.visemes=[];
+    this.textTimeline=buildTextTimeline(tx,totalDuration);
+    this.useTimeline=false;
+    this.active=true;
+    this.targets={};
+  },
+  stop(){
+    this.active=false;
+    this.visemes=[];
+    this.textTimeline=[];
+    this.useTimeline=false;
+    this.targets={};
+  },
+  getVisemeBlend(playbackMs){
+    const timeline=this.visemes;
+    if(!timeline.length)return{from:'sil',to:'sil',blend:0};
+    let idx=0;
+    for(let i=timeline.length-1;i>=0;i-=1){
+      if(timeline[i].audio_offset<=playbackMs){idx=i;break;}
     }
-    const levels=audioState.getLevels();
-    const targetEnergy=this.active?Math.min(1,levels.energy*1.7):0;
-    const targetBrightness=this.active?levels.brightness:0;
-    this.energy+=(targetEnergy-this.energy)*Math.min(1,10*dt);
-    this.brightness+=(targetBrightness-this.brightness)*Math.min(1,8*dt);
-    const articulation=Math.max(0,this.energy-.03);
-    const visemeAmount=this.active?VISEME_STRENGTH*(.6+articulation*.4):0;
-    const open=this.active?(V_OPEN[cur]??0)*MOUTH_SCALE*(.62+articulation*.38):0;
-    const sp=14*dt;
-    for(const k of ALL_V)lerpMorph('viseme_'+k,this.active&&k===cur?visemeAmount:0,sp);
-    lerpMorph('mouthOpen',open,sp);
-    lerpMorph('jawOpen',open*JAW_SCALE/MOUTH_SCALE,sp);
-    lerpMorph('mouthSmileLeft',this.active?this.brightness*.05:0,sp);
-    lerpMorph('mouthSmileRight',this.active?this.brightness*.05:0,sp);
+    const current=timeline[idx];
+    const next=timeline[idx+1];
+    const from=rpmVisemeForAzure(current.viseme_id);
+    if(!next)return{from,to:from,blend:1};
+    const to=rpmVisemeForAzure(next.viseme_id);
+    const span=Math.max(1,next.audio_offset-current.audio_offset);
+    const blend=Math.min(1,Math.max(0,(playbackMs-current.audio_offset)/span));
+    return{from,to,blend};
+  },
+  getTextViseme(elapsed){
+    let cur='sil';
+    const timeline=this.textTimeline;
+    if(!timeline.length)return cur;
+    const last=timeline.at(-1);
+    if(last&&elapsed>last.s+last.d+.24&&!audioState.active)return 'sil';
+    for(const ev of timeline)if(elapsed>=ev.s&&elapsed<ev.s+ev.d){cur=ev.v;break;}
+    return cur;
+  },
+  update(dt){
+    const sp=Math.min(1,14*dt);
+    let targetWeights={};
+    if(this.active&&this.useTimeline){
+      const {from,to,blend}=this.getVisemeBlend(audioState.getPlaybackTimeMs());
+      for(const k of ALL_V)targetWeights['viseme_'+k]=0;
+      if(from===to){
+        if(from!=='sil')targetWeights['viseme_'+from]=VISEME_STRENGTH;
+      }else{
+        if(from!=='sil')targetWeights['viseme_'+from]=VISEME_STRENGTH*(1-blend);
+        if(to!=='sil')targetWeights['viseme_'+to]=VISEME_STRENGTH*blend;
+      }
+      const openFrom=(V_OPEN[from]??0)*MOUTH_SCALE;
+      const openTo=(V_OPEN[to]??0)*MOUTH_SCALE;
+      targetWeights.mouthOpen=openFrom*(1-blend)+openTo*blend;
+      targetWeights.jawOpen=targetWeights.mouthOpen*JAW_SCALE/MOUTH_SCALE;
+    }else if(this.active&&this.textTimeline.length){
+      const cur=this.getTextViseme(audioState.getPlaybackTimeMs()/1000);
+      for(const k of ALL_V)targetWeights['viseme_'+k]=cur===k?VISEME_STRENGTH:0;
+      const open=(V_OPEN[cur]??0)*MOUTH_SCALE;
+      targetWeights.mouthOpen=open;
+      targetWeights.jawOpen=open*JAW_SCALE/MOUTH_SCALE;
+    }else{
+      for(const k of ALL_V)targetWeights['viseme_'+k]=0;
+      targetWeights.mouthOpen=0;
+      targetWeights.jawOpen=0;
+    }
+    if(hasFaceMorphs()){
+      for(const name of RPM_BLENDSHAPES){
+        const target=targetWeights[name]??0;
+        lerpMorph(name,target,sp);
+      }
+    }else{
+      boneSpeech.update(targetWeights.mouthOpen||0,dt);
+    }
   }
 };
 function unlockCtx(){
@@ -2584,6 +2721,41 @@ THREE.Cache.enabled=true;
 
 function b64ToAB(b64){const bin=atob(b64),buf=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)buf[i]=bin.charCodeAt(i);return buf.buffer;}
 
+function findSkeletonBone(root,suffix){
+  let found=null;
+  root.traverse(obj=>{
+    if(found)return;
+    if(obj.isBone){
+      const short=obj.name.includes(':')?obj.name.split(':').pop():obj.name;
+      if(short===suffix)found=obj;
+      return;
+    }
+    if(!obj.isSkinnedMesh||!obj.skeleton)return;
+    for(const bone of obj.skeleton.bones){
+      const short=bone.name.includes(':')?bone.name.split(':').pop():bone.name;
+      if(short===suffix){found=bone;break;}
+    }
+  });
+  return found;
+}
+function applyRelaxedArmPose(root){
+  const touched=new Set();
+  const rotate=(bone,fn)=>{
+    if(!bone||touched.has(bone))return;
+    touched.add(bone);
+    fn(bone);
+  };
+  const down=Math.PI*.5;
+  rotate(findSkeletonBone(root,'LeftArm'),b=>{b.rotateX(down);b.rotateZ(-down*.08);});
+  rotate(findSkeletonBone(root,'RightArm'),b=>{b.rotateX(-down);b.rotateZ(down*.08);});
+  rotate(findSkeletonBone(root,'LeftForeArm'),b=>b.rotateX(.12));
+  rotate(findSkeletonBone(root,'RightForeArm'),b=>b.rotateX(-.12));
+  root.traverse(obj=>{
+    if(obj.isSkinnedMesh&&obj.skeleton)obj.skeleton.update();
+  });
+  root.updateMatrixWorld(true);
+}
+
 function frameCameraOnFace(root){
   const bodyBox=new THREE.Box3().setFromObject(root);
   const h=bodyBox.max.y-bodyBox.min.y;
@@ -2603,12 +2775,17 @@ function finalizeLoadedModel(root, animations){
   root.traverse(child=>{
     if(!child.isMesh)return;
     child.castShadow=true; child.receiveShadow=true;
-    if(child.morphTargetDictionary&&Object.keys(child.morphTargetDictionary).length)
+    if(child.morphTargetDictionary&&Object.keys(child.morphTargetDictionary).length){
+      child.morphTargetInfluences=child.morphTargetInfluences||new Array(Object.keys(child.morphTargetDictionary).length).fill(0);
       morphRefs[child.name]={mesh:child,dict:child.morphTargetDictionary};
+    }
   });
+  const clips=animations||[];
+  if(!clips.length)applyRelaxedArmPose(root);
+  avatarRoot=root;
+  boneSpeech.bind(root);
   scene.add(root);
   frameCameraOnFace(root);
-  const clips=animations||[];
   if(clips.length){
     mixer=new THREE.AnimationMixer(root);
     const act=mixer.clipAction(clips[0]);
@@ -2662,6 +2839,21 @@ function finalizeLoadedModel(root, animations){
       loader.setMeshoptDecoder(MeshoptDecoder);
       loader.parse(buffer,'',(gltf)=>{
         clearInterval(heartbeat);
+        gltf.scene.traverse(child=>{
+          if(!child.isMesh)return;
+          child.castShadow=true;
+          child.receiveShadow=true;
+          const materials=Array.isArray(child.material)?child.material:[child.material];
+          const meshKey=child.name.toLowerCase();
+          for(const material of materials){
+            if(!material)continue;
+            const matKey=(material.name||'').toLowerCase();
+            if(meshKey.includes('skin')||meshKey.includes('body')||matKey.includes('skin')||matKey.includes('body')){
+              material.roughness=0.7;
+              material.metalness=0.0;
+            }
+          }
+        });
         finalizeLoadedModel(gltf.scene, gltf.animations);
       },(err)=>{
         clearInterval(heartbeat);
@@ -2681,7 +2873,7 @@ function finalizeLoadedModel(root, animations){
 ========================================================= */
 const ttschk=document.getElementById('ttschk');
 const TTS_VOICE=queryParams.get('tts_voice')||'en-US-JennyNeural';
-const TTS_PROVIDER=queryParams.get('tts_provider')||'edge';
+const TTS_PROVIDER=queryParams.get('tts_provider')||'azure';
 const REMOTE_SERVER='https://multilingual-virtual-assistant.onrender.com';
 const LOCAL_SERVER='http://127.0.0.1:8000';
 function getCurrentOriginServer(){
@@ -2726,16 +2918,39 @@ async function fetchFromCandidates(path, options={}, preferredBases=SERVER_CANDI
   throw lastError||new Error(`Request failed for ${path}`);
 }
 const ttsCache=new Map();
-async function fetchTtsBuffer(text){
+function decodeTtsPayload(payload){
+  const visemes=Array.isArray(payload?.visemes)?payload.visemes:[];
+  if(payload?.audioBuffer)return{audio:payload.audioBuffer,visemes};
+  const base64=payload?.base64||payload?.audio;
+  if(base64){
+    const binary=atob(base64);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return{audio:bytes.buffer,visemes};
+  }
+  throw new Error('Missing TTS audio payload');
+}
+async function parseTtsFetchResponse(response){
+  const buffer=await response.arrayBuffer();
+  if(!buffer||buffer.byteLength<512)throw new Error('TTS audio too small');
+  const bytes=new Uint8Array(buffer);
+  if(bytes[0]===0x7b){
+    try{
+      return decodeTtsPayload(JSON.parse(new TextDecoder().decode(buffer)));
+    }catch{}
+  }
+  return{audio:buffer,visemes:[]};
+}
+async function fetchTtsPayload(text){
   const key=(text||'').trim();
   if(!key)throw new Error('Missing text for TTS');
   if(ttsCache.has(key)){
     const hit=ttsCache.get(key);
     return hit instanceof Promise?await hit:hit;
   }
-  const job=apiTts(key).then((buf)=>{
-    ttsCache.set(key,buf);
-    return buf;
+  const job=apiTts(key).then((payload)=>{
+    ttsCache.set(key,payload);
+    return payload;
   }).catch((err)=>{
     ttsCache.delete(key);
     throw err;
@@ -2746,7 +2961,7 @@ async function fetchTtsBuffer(text){
 function prefetchTts(text){
   const key=(text||'').trim();
   if(!key||ttsCache.has(key))return;
-  fetchTtsBuffer(key).catch(()=>{});
+  fetchTtsPayload(key).catch(()=>{});
 }
 let speechToken=0;
 let ttsRequestCounter=0;
@@ -2755,15 +2970,13 @@ window._onNativeTtsAudio=async function(payload){
   const id=payload&&payload.id;
   const base64=payload&&payload.base64;
   const uri=payload&&payload.uri;
+  const visemes=Array.isArray(payload?.visemes)?payload.visemes:[];
   const pending=id?pendingTtsRequests.get(id):null;
   if(!pending)return;
   pendingTtsRequests.delete(id);
   if(base64){
     try{
-      const binary=atob(base64);
-      const bytes=new Uint8Array(binary.length);
-      for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-      pending.resolve(bytes.buffer);
+      pending.resolve(decodeTtsPayload({base64,visemes}));
       return;
     }catch(error){
       pending.reject(error);
@@ -2774,7 +2987,12 @@ window._onNativeTtsAudio=async function(payload){
   try{
     const response=await fetch(uri);
     if(!response.ok)throw new Error(`TTS file HTTP ${response.status}`);
-    pending.resolve(await response.arrayBuffer());
+    const contentType=(response.headers.get('content-type')||'').toLowerCase();
+    if(contentType.includes('json')){
+      pending.resolve(decodeTtsPayload(await response.json()));
+      return;
+    }
+    pending.resolve(await parseTtsFetchResponse(response));
   }catch(error){
     pending.reject(error);
   }
@@ -2803,12 +3021,12 @@ async function apiTts(text){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({text,voice_name:TTS_VOICE,provider:TTS_PROVIDER})
   },TTS_SERVER_CANDIDATES,12000);
-  return await r.arrayBuffer();
+  return parseTtsFetchResponse(r);
 }
 function speakWithNativeFallback(trimmed,token){
   if(GUIDED_MODE||!window.ReactNativeWebView)return false;
   setSt('speaking','Speaking…');
-  lipsync.play(trimmed,estimateSpeechDuration(trimmed));
+  lipsync.playTextFallback(trimmed,estimateSpeechDuration(trimmed));
   window.ReactNativeWebView.postMessage(JSON.stringify({type:'native-speak',text:trimmed}));
   return true;
 }
@@ -2841,12 +3059,13 @@ async function speak(text){
     const ready=cached&&!(cached instanceof Promise);
     setSt(ready?'speaking':'thinking',ready?'Speaking…':'Getting ready to speak…');
     await audioState.prime().catch(()=>{});
-    const audioBuffer=await fetchTtsBuffer(trimmed);
+    const {audio:audioBuffer,visemes}=await fetchTtsPayload(trimmed);
     if(token!==speechToken)return;
     await audioState.playAudio(audioBuffer,{
       onstart:(duration)=>{
         if(token!==speechToken){audioState.stop();return;}
-        lipsync.play(trimmed,duration);
+        if(visemes.length)lipsync.startVisemeTimeline(visemes);
+        else lipsync.playTextFallback(trimmed,duration);
         setSt('speaking','Speaking…');
       },
       onended:()=>{
@@ -3034,6 +3253,28 @@ async function speakScriptLine(text){
   if(!GUIDED_MODE)addMsg('assistant',trimmed);
   await speak(trimmed);
 }
+let scriptSpeechQueue=[];
+let scriptSpeechRunning=false;
+async function drainScriptSpeechQueue(){
+  if(scriptSpeechRunning)return;
+  scriptSpeechRunning=true;
+  try{
+    while(scriptSpeechQueue.length){
+      const text=scriptSpeechQueue.shift();
+      await speakScriptLine(text);
+    }
+  }finally{
+    scriptSpeechRunning=false;
+    if(scriptSpeechQueue.length)drainScriptSpeechQueue();
+  }
+}
+function speakScriptSegments(texts){
+  const parts=(texts||[]).map((text)=>(text||'').trim()).filter(Boolean);
+  if(!parts.length)return;
+  stopSpeech(GUIDED_MODE?'Ready for next part':'Listening…');
+  scriptSpeechQueue=parts;
+  drainScriptSpeechQueue();
+}
 bstart.addEventListener('click',startAvatarSession);
 bend.addEventListener('click',async()=>{
   stopSpeech('Session ended');setTyp(true);
@@ -3098,6 +3339,11 @@ window.addEventListener('message',event=>{
     return;
   }
 
+  if(data.type==='host-speak-script-segments'){
+    speakScriptSegments(data.texts||[]);
+    return;
+  }
+
   if(data.type==='host-prefetch-tts'){
     (data.texts||[]).forEach(prefetchTts);
     return;
@@ -3120,6 +3366,7 @@ window._nativeHostCommand=function(cmd){
   if(cmd.type==='host-start-session'){startAvatarSession({promptOverride:cmd.prompt||null,announce:cmd.announce!==false});return;}
   if(cmd.type==='host-send-text'){if(GUIDED_MODE)return;if(!sid&&cmd.text){startAvatarSession({promptOverride:cmd.text,announce:false});return;}inp.value=cmd.text||'';handleSend();return;}
   if(cmd.type==='host-speak-script'){speakScriptLine(cmd.text||'');return;}
+  if(cmd.type==='host-speak-script-segments'){speakScriptSegments(cmd.texts||[]);return;}
   if(cmd.type==='host-prefetch-tts'){(cmd.texts||[]).forEach(prefetchTts);return;}
   if(cmd.type==='host-end-session'){hostEndSession();return;}
   if(cmd.type==='host-pause-session'){hostPauseSession();}

@@ -23,7 +23,7 @@ import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Speech from 'expo-speech';
 import { auth, db } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
@@ -35,7 +35,7 @@ import { recordCompletedSession } from '../utils/sessionTracking';
 const DOCK_HEIGHT = 480;
 const AVATAR_TTS_SERVER = 'https://multilingual-virtual-assistant.onrender.com';
 const AVATAR_TTS_VOICE = 'en-US-JennyNeural';
-const AVATAR_TTS_PROVIDER = 'edge';
+const AVATAR_TTS_PROVIDER = 'azure';
 
 function hashTtsKey(text) {
   const input = `${AVATAR_TTS_VOICE}|${AVATAR_TTS_PROVIDER}|${(text || '').trim()}`;
@@ -62,7 +62,114 @@ function arrayBufferToBase64(buffer) {
   return result;
 }
 
-async function fetchTtsBase64ForText(text, memoryCache) {
+function parseTtsPayloadFromBuffer(buffer) {
+  if (!buffer || buffer.byteLength < 512) throw new Error('TTS audio too small');
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0x7b) {
+    try {
+      const json = JSON.parse(new TextDecoder().decode(buffer));
+      const audioBase64 = json.audio || json.base64 || '';
+      if (audioBase64 && audioBase64.length > 512) {
+        return {
+          base64: audioBase64,
+          visemes: Array.isArray(json.visemes) ? json.visemes : [],
+        };
+      }
+    } catch {
+      // Fall through to legacy raw-audio handling.
+    }
+  }
+  return {
+    base64: arrayBufferToBase64(buffer),
+    visemes: [],
+  };
+}
+
+function readCachedTtsPayload(raw, legacyBase64 = false) {
+  if (legacyBase64) {
+    if (raw && raw.length > 512) {
+      return { base64: raw, visemes: [] };
+    }
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.base64 && parsed.base64.length > 512) {
+      return {
+        base64: parsed.base64,
+        visemes: Array.isArray(parsed.visemes) ? parsed.visemes : [],
+      };
+    }
+  } catch {
+    if (raw && raw.length > 512 && !raw.trimStart().startsWith('{')) {
+      return { base64: raw, visemes: [] };
+    }
+  }
+  return null;
+}
+
+const TTS_MAX_CONCURRENT = 2;
+let ttsActiveFetches = 0;
+const ttsFetchWaitQueue = [];
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function acquireTtsSlot() {
+  if (ttsActiveFetches < TTS_MAX_CONCURRENT) {
+    ttsActiveFetches += 1;
+    return;
+  }
+  await new Promise((resolve) => {
+    ttsFetchWaitQueue.push(resolve);
+  });
+  ttsActiveFetches += 1;
+}
+
+function releaseTtsSlot() {
+  ttsActiveFetches = Math.max(0, ttsActiveFetches - 1);
+  const next = ttsFetchWaitQueue.shift();
+  if (next) next();
+}
+
+async function fetchTtsHttpResponse(text) {
+  const body = JSON.stringify({
+    text,
+    voice_name: AVATAR_TTS_VOICE,
+    provider: AVATAR_TTS_PROVIDER,
+  });
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await acquireTtsSlot();
+    try {
+      const response = await fetch(`${AVATAR_TTS_SERVER}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      if ([502, 503, 504].includes(response.status) && attempt < 3) {
+        throw new Error(`TTS HTTP ${response.status}`);
+      }
+      if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3 && /TTS HTTP 50[234]/.test(error.message || '')) {
+        await sleep(1200 * attempt);
+        continue;
+      }
+      throw error;
+    } finally {
+      releaseTtsSlot();
+    }
+  }
+  throw lastError || new Error('TTS fetch failed');
+}
+
+async function fetchTtsPayloadForText(text, memoryCache) {
   const trimmed = (text || '').trim();
   if (!trimmed) throw new Error('Missing TTS text');
 
@@ -72,52 +179,67 @@ async function fetchTtsBase64ForText(text, memoryCache) {
   }
 
   const cacheDir = FileSystem.cacheDirectory || '';
-  const filePath = `${cacheDir}tts-${cacheKey}.mp3`;
+  const filePath = `${cacheDir}tts-${cacheKey}.json`;
+  const legacyFilePath = `${cacheDir}tts-${cacheKey}.mp3`;
 
-  try {
-    const info = await FileSystem.getInfoAsync(filePath);
-    if (info.exists && (info.size || 0) > 512) {
-      const fromDisk = await FileSystem.readAsStringAsync(filePath, { encoding: 'base64' });
-      if (fromDisk && fromDisk.length > 512) {
-        memoryCache.set(cacheKey, fromDisk);
-        return fromDisk;
+  for (const [path, legacy] of [[filePath, false], [legacyFilePath, true]]) {
+    try {
+      const info = await FileSystem.getInfoAsync(path);
+      if (!info.exists || (info.size || 0) <= 64) continue;
+      const raw = legacy
+        ? await FileSystem.readAsStringAsync(path, { encoding: 'base64' })
+        : await FileSystem.readAsStringAsync(path);
+      const payload = readCachedTtsPayload(raw, legacy);
+      if (payload) {
+        memoryCache.set(cacheKey, payload);
+        return payload;
       }
-      await FileSystem.deleteAsync(filePath, { idempotent: true });
+      await FileSystem.deleteAsync(path, { idempotent: true });
+    } catch {
+      // Try the next cache location or refetch from server.
     }
-  } catch {
-    // Refetch from server if disk cache is unreadable.
   }
 
-  const response = await fetch(`${AVATAR_TTS_SERVER}/tts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text: trimmed,
-      voice_name: AVATAR_TTS_VOICE,
-      provider: AVATAR_TTS_PROVIDER,
-    }),
-  });
-  if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);
-
-  const buffer = await response.arrayBuffer();
-  if (!buffer || buffer.byteLength < 512) throw new Error('TTS audio too small');
-
-  const base64 = arrayBufferToBase64(buffer);
-  memoryCache.set(cacheKey, base64);
+  const response = await fetchTtsHttpResponse(trimmed);
+  const payload = parseTtsPayloadFromBuffer(await response.arrayBuffer());
+  memoryCache.set(cacheKey, payload);
 
   try {
-    await FileSystem.writeAsStringAsync(filePath, base64, { encoding: 'base64' });
+    await FileSystem.writeAsStringAsync(filePath, JSON.stringify(payload));
   } catch {
     // In-memory cache is enough when disk write fails.
   }
 
-  return base64;
+  return payload;
 }
 
-function deliverTtsToWebView(webViewRef, requestId, base64) {
-  const payload = JSON.stringify({ id: requestId, base64: base64 || null });
+function getTtsCacheFilePath(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return '';
+  return `${FileSystem.cacheDirectory || ''}tts-${hashTtsKey(trimmed)}.json`;
+}
+
+async function deliverTtsToWebView(webViewRef, requestId, text, payload) {
+  let deliver = payload;
+  if (!deliver?.base64) {
+    const filePath = getTtsCacheFilePath(text);
+    if (filePath) {
+      try {
+        const info = await FileSystem.getInfoAsync(filePath);
+        if (info.exists) {
+          const raw = await FileSystem.readAsStringAsync(filePath);
+          deliver = readCachedTtsPayload(raw);
+        }
+      } catch {
+        // Fall through to null payload below.
+      }
+    }
+  }
+  const visemes = Array.isArray(deliver?.visemes) ? deliver.visemes : [];
+  const base64 = deliver?.base64 || null;
+  const deliverPayload = JSON.stringify({ id: requestId, base64, visemes });
   webViewRef.current?.injectJavaScript(
-    `(function(){try{window._onNativeTtsAudio(${payload});}catch(e){}})();true;`,
+    `(function(){try{window._onNativeTtsAudio(${deliverPayload});}catch(e){}})();true;`,
   );
 }
 
@@ -239,6 +361,27 @@ function getAllSessionChapterTexts(sessionId) {
     .filter(Boolean);
 }
 
+function getChapterSegmentTexts(sessionId, chapterIndex) {
+  const chapters = getSessionChapters(sessionId);
+  const segments = SESSION_SCRIPTS[sessionId] || [];
+  const chapter = chapters[chapterIndex];
+  if (!chapter) return [];
+  return segments
+    .slice(chapter.startIndex, chapter.endIndex + 1)
+    .map((segment) => segment.text)
+    .filter(Boolean);
+}
+
+function getAllSessionSegmentTexts(sessionId) {
+  return (SESSION_SCRIPTS[sessionId] || [])
+    .map((segment) => segment.text)
+    .filter(Boolean);
+}
+
+function getFirstSessionSegmentText(sessionId) {
+  return (SESSION_SCRIPTS[sessionId] || [])[0]?.text || '';
+}
+
 // Applied as the injectedJavaScript PROP on every WebView (runs after DOM is ready,
 // before user interaction — more reliable than the injectJavaScript() method):
 //   1. Forces textarea/input font-size to 16px  →  prevents iOS WKWebView auto-zoom
@@ -268,7 +411,7 @@ const WEBVIEW_STATIC_JS = `(function(){try{
     fetch('https://multilingual-virtual-assistant.onrender.com/tts',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:'Ready.',voice_name:'en-US-JennyNeural',provider:'edge'})
+      body:JSON.stringify({text:'Ready.',voice_name:'en-US-JennyNeural',provider:'azure'})
     }).catch(function(){});
   }catch(e){}},1000);
 }catch(e){}})();true;`;
@@ -285,14 +428,20 @@ const HOME_WEBVIEW_STATIC_JS = `(function(){try{
   if(vm)vm.setAttribute('content','width=device-width,initial-scale=1,maximum-scale=1');
   var sr=document.querySelector('.sr');
   if(sr)sr.style.cssText='display:none!important';
-  setTimeout(function(){try{fetch('https://multilingual-virtual-assistant.onrender.com/health',{method:'GET'}).catch(function(){});}catch(e){}},1000);
+  setTimeout(function(){try{
+    fetch('https://multilingual-virtual-assistant.onrender.com/health',{method:'GET'}).catch(function(){});
+    fetch('https://multilingual-virtual-assistant.onrender.com/tts',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:'Ready.',voice_name:'en-US-JennyNeural',provider:'azure'})
+    }).catch(function(){});
+  }catch(e){}},1000);
 }catch(e){}})();true;`;
 
 // Keep the old name as an alias so existing injectJavaScript() call-sites still compile
 const HIDE_CONTROLS_JS = WEBVIEW_STATIC_JS;
 const HIDE_HOME_CONTROLS_JS = HOME_WEBVIEW_STATIC_JS;
 
-const AVATAR_WELCOME_LINE = "Hello. I'm your mindfulness assistant, and I'm here to help. How are you doing today?";
 const PLACEHOLDER_SESSION_LINE = 'This guided session is coming soon. Please choose another session for now.';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -540,13 +689,14 @@ export default function HomeScreen({ navigation }) {
   const avatarConversationId                      = useRef(createSessionId()).current;
   const [avatarHtmlBase, setAvatarHtmlBase]       = useState(null);
   const [avatarModelUri, setAvatarModelUri]       = useState(null);
+  const [avatarEnvUri, setAvatarEnvUri]           = useState(null);
   const [avatarReadAccessUri, setAvatarReadAccessUri] = useState(null);
   const [avatarLoadError, setAvatarLoadError]     = useState('');
-  const [dockExpanded, setDockExpanded]           = useState(true);
+  const [guideDockVisible, setGuideDockVisible]   = useState(false);
+  const [dockExpanded, setDockExpanded]           = useState(false);
   const sessionWebViewRef                         = useRef(null);
   const homeDockWebViewRef                        = useRef(null);
   const homeDockLoadCount                         = useRef(0);
-  const homeWelcomePlayed                         = useRef(false);
   const avatarVoiceId                             = useRef(null);
   const ttsBase64Cache                            = useRef(new Map());
   const ttsInFlight                               = useRef(new Map());
@@ -559,6 +709,7 @@ export default function HomeScreen({ navigation }) {
 
   // ── Script state (scripted sessions) ──
   const [scriptSlideIndex, setScriptSlideIndex] = useState(0);
+  const [ttsVoiceReady, setTtsVoiceReady] = useState(false);
 
   // ── Modals ──
   const [summaryVisible, setSummaryVisible]   = useState(false);
@@ -643,18 +794,18 @@ export default function HomeScreen({ navigation }) {
     dockTitle: t('guideDockTitle'),
   }), [t]);
   const homeDockUri = useMemo(() => buildAvatarUri(avatarHtmlBase, {
-    compact: '1', host: 'home-dock', chat_id: avatarConversationId, tts_base: AVATAR_TTS_SERVER, tts_voice: AVATAR_TTS_VOICE, tts_provider: AVATAR_TTS_PROVIDER, model_url: avatarModelUri,
-  }), [avatarHtmlBase, avatarConversationId, avatarModelUri]);
+    compact: '1', host: 'home-dock', chat_id: avatarConversationId, tts_base: AVATAR_TTS_SERVER, tts_voice: AVATAR_TTS_VOICE, tts_provider: AVATAR_TTS_PROVIDER, model_url: avatarModelUri, env_url: avatarEnvUri,
+  }), [avatarHtmlBase, avatarConversationId, avatarModelUri, avatarEnvUri]);
 
   const sessionAvatarUri = useMemo(() => buildAvatarUri(avatarHtmlBase, {
-    compact: '1', guided: '1', host: 'session-panel', session: selectedSessionId, chat_id: avatarConversationId, tts_base: AVATAR_TTS_SERVER, tts_voice: AVATAR_TTS_VOICE, tts_provider: AVATAR_TTS_PROVIDER, model_url: avatarModelUri,
-  }), [avatarHtmlBase, selectedSessionId, avatarConversationId, avatarModelUri]);
+    compact: '1', guided: '1', host: 'session-panel', session: selectedSessionId, chat_id: avatarConversationId, tts_base: AVATAR_TTS_SERVER, tts_voice: AVATAR_TTS_VOICE, tts_provider: AVATAR_TTS_PROVIDER, model_url: avatarModelUri, env_url: avatarEnvUri,
+  }), [avatarHtmlBase, selectedSessionId, avatarConversationId, avatarModelUri, avatarEnvUri]);
 
-  const getTtsBase64 = useCallback(async (text) => {
+  const getTtsPayload = useCallback(async (text) => {
     const key = (text || '').trim();
     if (!key) throw new Error('Missing TTS text');
     if (ttsInFlight.current.has(key)) return ttsInFlight.current.get(key);
-    const job = fetchTtsBase64ForText(key, ttsBase64Cache.current).finally(() => {
+    const job = fetchTtsPayloadForText(key, ttsBase64Cache.current).finally(() => {
       ttsInFlight.current.delete(key);
     });
     ttsInFlight.current.set(key, job);
@@ -662,40 +813,83 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   const prefetchSessionTts = useCallback((sessionId) => {
-    getAllSessionChapterTexts(sessionId).forEach((chapterText) => {
-      getTtsBase64(chapterText).catch(() => {});
-    });
-  }, [getTtsBase64]);
+    void (async () => {
+      for (const segmentText of getAllSessionSegmentTexts(sessionId)) {
+        try {
+          await getTtsPayload(segmentText);
+        } catch {
+          // Keep prefetching remaining segments after a transient failure.
+        }
+      }
+    })();
+  }, [getTtsPayload]);
 
   useEffect(() => {
     fetch(`${AVATAR_TTS_SERVER}/health`).catch(() => {});
+    fetch(`${AVATAR_TTS_SERVER}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'Ready.',
+        voice_name: AVATAR_TTS_VOICE,
+        provider: AVATAR_TTS_PROVIDER,
+      }),
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (screen !== 'session') return;
+    if (screen !== 'session') {
+      setTtsVoiceReady(false);
+      return;
+    }
+    const session = sessionCatalog.find((s) => s.id === selectedSessionId);
+    if (!session || session.kind !== 'scripted') {
+      setTtsVoiceReady(true);
+      return;
+    }
+    let cancelled = false;
+    setTtsVoiceReady(false);
+    const firstSegment = getFirstSessionSegmentText(selectedSessionId);
+    if (!firstSegment) {
+      setTtsVoiceReady(true);
+      return undefined;
+    }
+    getTtsPayload(firstSegment)
+      .then(() => {
+        if (!cancelled) setTtsVoiceReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setTtsVoiceReady(true);
+      });
     prefetchSessionTts(selectedSessionId);
-  }, [screen, selectedSessionId, prefetchSessionTts]);
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, selectedSessionId, getTtsPayload, prefetchSessionTts]);
 
-  // ── Load avatar.html + character.glb assets ──
+  // ── Load avatar.html + avatar.glb + studio_lighting.hdr ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const htmlAsset = Asset.fromModule(require('../../assets/avatar.html'));
-        const modelAsset = Asset.fromModule(require('../../assets/character.glb'));
+        const modelAsset = Asset.fromModule(require('../../assets/avatar.glb'));
+        const envAsset = Asset.fromModule(require('../../assets/studio_lighting.hdr'));
         setAvatarLoadError('');
-        await Promise.all([htmlAsset.downloadAsync(), modelAsset.downloadAsync()]);
+        await Promise.all([htmlAsset.downloadAsync(), modelAsset.downloadAsync(), envAsset.downloadAsync()]);
         const htmlUri = resolvePackagerAssetUri(htmlAsset);
         const modelUri = resolvePackagerAssetUri(modelAsset);
+        const envUri = resolvePackagerAssetUri(envAsset);
         const readAccessUri = getFileUriParentDirectory(htmlAsset.localUri || htmlUri);
         if (!cancelled) {
           if (htmlUri && modelUri) {
             setAvatarHtmlBase(htmlUri);
             setAvatarModelUri(modelUri);
+            setAvatarEnvUri(envUri || '');
             setAvatarReadAccessUri(readAccessUri);
           } else {
             setAvatarLoadError(
-              'Avatar assets resolved to no URI. Check metro.config.js has assetExts for html and glb, then run `npx expo start --clear`.',
+              'Avatar assets resolved to no URI. Check metro.config.js has assetExts for html, glb, and hdr, then run `npx expo start --clear`.',
             );
           }
         }
@@ -735,19 +929,6 @@ export default function HomeScreen({ navigation }) {
       .catch(() => {});
   }, []);
 
-  const injectHomeWelcome = useCallback(() => {
-    if (homeWelcomePlayed.current) return;
-    homeWelcomePlayed.current = true;
-    const payload = JSON.stringify({
-      source: 'mindfulness-host',
-      type: 'host-speak-script',
-      text: AVATAR_WELCOME_LINE,
-    });
-    homeDockWebViewRef.current?.injectJavaScript(
-      `(function(){try{window._nativeHostCommand(${payload});}catch(e){}})();true;`
-    );
-  }, []);
-
   const injectAvatarDone = useCallback(() => {
     const js = `(function(){try{if(typeof window.onNativeSpeakDone==='function')window.onNativeSpeakDone();}catch(e){}})();true;`;
     sessionWebViewRef.current?.injectJavaScript(js);
@@ -758,18 +939,16 @@ export default function HomeScreen({ navigation }) {
   const handleWebViewMessage = useCallback((event) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === 'avatar-model-ready' && msg.host === 'home-dock') {
-        injectHomeWelcome();
-      } else if (msg.type === 'tts-fetch') {
+      if (msg.type === 'tts-fetch') {
         const host = msg.host || 'session-panel';
         const webViewRef = host === 'home-dock' ? homeDockWebViewRef : sessionWebViewRef;
         void (async () => {
           try {
-            const base64 = await getTtsBase64(msg.text || '');
-            deliverTtsToWebView(webViewRef, msg.id, base64);
+            const ttsPayload = await getTtsPayload(msg.text || '');
+            deliverTtsToWebView(webViewRef, msg.id, msg.text || '', ttsPayload);
           } catch (error) {
             console.warn('TTS fetch failed:', error);
-            deliverTtsToWebView(webViewRef, msg.id, null);
+            deliverTtsToWebView(webViewRef, msg.id, msg.text || '', null);
           }
         })();
       } else if (msg.type === 'native-speak') {
@@ -806,7 +985,7 @@ export default function HomeScreen({ navigation }) {
         );
       }
     } catch {}
-  }, [getTtsBase64, injectAvatarDone, injectHomeWelcome]);
+  }, [getTtsPayload, injectAvatarDone]);
 
   // ── Inject a postMessage event into the session avatar WebView ──
   // avatar.html listens for { source: 'mindfulness-host', type, ... } on window.
@@ -817,6 +996,12 @@ export default function HomeScreen({ navigation }) {
     );
   }, []);
 
+  const speakChapterSegments = useCallback((sessionId, chapterIndex) => {
+    const texts = getChapterSegmentTexts(sessionId, chapterIndex);
+    if (!texts.length) return;
+    injectAvatarCommand({ type: 'host-speak-script-segments', texts });
+  }, [injectAvatarCommand]);
+
   // ── Called after the session WebView finishes loading ──
   // Always hides the avatar's built-in Start/End buttons.
   // Only re-injects context when returning to an already-active session (resume).
@@ -826,19 +1011,20 @@ export default function HomeScreen({ navigation }) {
     }, 300);
     setTimeout(() => {
       prefetchSessionTts(selectedSessionId);
+      const segmentTexts = getAllSessionSegmentTexts(selectedSessionId);
+      if (segmentTexts.length) {
+        injectAvatarCommand({ type: 'host-prefetch-tts', texts: segmentTexts });
+      }
     }, 500);
     if (!sessionActive) return;
     setTimeout(() => {
       const session = sessionCatalog.find((s) => s.id === selectedSessionId) || sessionCatalog[0];
       if (session.kind === 'scripted') {
         const chapterIndex = getChapterIndexForSegment(session.id, scriptSlideIndex);
-        const text = getChapterSpeechText(session.id, chapterIndex);
-        if (text) {
-          injectAvatarCommand({ type: 'host-speak-script', text });
-        }
+        speakChapterSegments(session.id, chapterIndex);
       }
     }, 700);
-  }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand, prefetchSessionTts]);
+  }, [selectedSessionId, sessionActive, scriptSlideIndex, injectAvatarCommand, prefetchSessionTts, speakChapterSegments]);
 
   const handleHomeDockLoad = useCallback(() => {
     setTimeout(() => {
@@ -892,7 +1078,7 @@ export default function HomeScreen({ navigation }) {
   }, [sessionActive, selectedSessionId, injectAvatarCommand]);
 
   // Called when the user explicitly presses Start Session
-  const startSession = useCallback(() => {
+  const startSession = useCallback(async () => {
     const session = sessionCatalog.find((s) => s.id === selectedSessionId) || sessionCatalog[0];
     setSummaryVisible(false);
     setSessionStartTime(Date.now());
@@ -901,21 +1087,22 @@ export default function HomeScreen({ navigation }) {
     if (session.kind === 'scripted') {
       const chapters = getSessionChapters(session.id);
       setScriptSlideIndex(chapters[0]?.startIndex ?? 0);
-    } else {
-      setPlaceholderMessage(`${session.title} is intentionally empty right now.`);
-    }
-    prefetchSessionTts(session.id);
-    setTimeout(() => {
-      if (session.kind === 'scripted') {
-        const text = getChapterSpeechText(session.id, 0);
-        if (text) {
-          injectAvatarCommand({ type: 'host-speak-script', text });
+      const firstSegment = getChapterSegmentTexts(session.id, 0)[0];
+      if (firstSegment) {
+        try {
+          await getTtsPayload(firstSegment);
+        } catch {
+          // Speak anyway; avatar will retry or fall back.
         }
-        return;
       }
-      injectAvatarCommand({ type: 'host-speak-script', text: PLACEHOLDER_SESSION_LINE });
-    }, 200);
-  }, [selectedSessionId, injectAvatarCommand, prefetchSessionTts]);
+      speakChapterSegments(session.id, 0);
+      prefetchSessionTts(session.id);
+      return;
+    }
+    setPlaceholderMessage(`${session.title} is intentionally empty right now.`);
+    prefetchSessionTts(session.id);
+    injectAvatarCommand({ type: 'host-speak-script', text: PLACEHOLDER_SESSION_LINE });
+  }, [selectedSessionId, injectAvatarCommand, prefetchSessionTts, getTtsPayload, speakChapterSegments]);
 
   const endSession = useCallback(() => {
     if (!sessionActive) return;
@@ -969,11 +1156,19 @@ export default function HomeScreen({ navigation }) {
     const nextChapter = currentChapter + 1;
     const nextStart = chapters[nextChapter]?.startIndex ?? scriptSlideIndex + 1;
     setScriptSlideIndex(nextStart);
-    const text = getChapterSpeechText(selectedSessionId, nextChapter);
-    if (text) injectAvatarCommand({ type: 'host-speak-script', text });
-    const upcoming = getChapterSpeechText(selectedSessionId, nextChapter + 1);
-    if (upcoming) getTtsBase64(upcoming).catch(() => {});
-  }, [scriptSlideIndex, selectedSessionId, endSession, injectAvatarCommand, getTtsBase64]);
+    const segmentTexts = getChapterSegmentTexts(selectedSessionId, nextChapter);
+    const firstSegment = segmentTexts[0];
+    if (firstSegment) {
+      getTtsPayload(firstSegment)
+        .then(() => speakChapterSegments(selectedSessionId, nextChapter))
+        .catch(() => speakChapterSegments(selectedSessionId, nextChapter));
+    } else {
+      speakChapterSegments(selectedSessionId, nextChapter);
+    }
+    getChapterSegmentTexts(selectedSessionId, nextChapter + 1).forEach((segmentText) => {
+      getTtsPayload(segmentText).catch(() => {});
+    });
+  }, [scriptSlideIndex, selectedSessionId, endSession, speakChapterSegments, getTtsPayload]);
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1012,8 +1207,8 @@ export default function HomeScreen({ navigation }) {
           style={styles.scroll}
           contentContainerStyle={[
             styles.container,
-            !dockExpanded && styles.containerWithGuideBar,
-            dockExpanded && styles.containerWithExpandedDock,
+            guideDockVisible && !dockExpanded && styles.containerWithGuideBar,
+            guideDockVisible && dockExpanded && styles.containerWithExpandedDock,
           ]}
           showsVerticalScrollIndicator
           keyboardShouldPersistTaps="handled"
@@ -1022,8 +1217,11 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.heroEyebrow}>{t('guideEyebrow')}</Text>
             <Text style={styles.heroBody}>{t('guideHeroBody')}</Text>
             <View style={styles.heroActions}>
-              {!dockExpanded ? (
-                <Pressable style={({ pressed }) => [styles.heroBtnPrimary, pressed && styles.btnPressed]} onPress={() => setDockExpanded(true)}>
+              {!guideDockVisible || !dockExpanded ? (
+                <Pressable
+                  style={({ pressed }) => [styles.heroBtnPrimary, pressed && styles.btnPressed]}
+                  onPress={() => { setGuideDockVisible(true); setDockExpanded(true); }}
+                >
                   <Text style={styles.heroBtnPrimaryText}>{t('guideOpen')}</Text>
                 </Pressable>
               ) : (
@@ -1174,12 +1372,19 @@ export default function HomeScreen({ navigation }) {
                 </Text>
                 {!sessionActive && selectedSession.kind === 'scripted' && (
                   <Pressable
-                    style={({ pressed }) => [styles.startBtnFull, pressed && styles.btnPressed]}
+                    style={({ pressed }) => [
+                      styles.startBtnFull,
+                      !ttsVoiceReady && styles.startBtnUnavailable,
+                      pressed && ttsVoiceReady && styles.btnPressed,
+                    ]}
                     onPress={startSession}
+                    disabled={!ttsVoiceReady}
                     accessibilityRole="button"
-                    accessibilityLabel="Start session"
+                    accessibilityLabel={ttsVoiceReady ? 'Start session' : 'Preparing voice'}
                   >
-                    <Text style={styles.startBtnFullText}>Start session</Text>
+                    <Text style={styles.startBtnFullText}>
+                      {ttsVoiceReady ? 'Start session' : 'Preparing voice…'}
+                    </Text>
                   </Pressable>
                 )}
                 {!sessionActive && selectedSession.kind !== 'scripted' && (
@@ -1239,7 +1444,7 @@ export default function HomeScreen({ navigation }) {
         avatarError={avatarLoadError}
         avatarReadAccessUri={avatarReadAccessUri}
         expanded={dockExpanded}
-        visible={screen === 'home'}
+        visible={screen === 'home' && guideDockVisible}
         onToggle={() => setDockExpanded((v) => !v)}
         webViewRef={homeDockWebViewRef}
         onLoad={handleHomeDockLoad}

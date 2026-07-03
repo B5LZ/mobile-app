@@ -19,3 +19,9 @@ services:
         value: Iapetus
       - key: ALLOWED_ORIGINS
         value: https://multilingual-virtual-assistant.onrender.com
+      - key: AZURE_SPEECH_KEY
+        sync: false
+      - key: AZURE_SPEECH_REGION
+        value: eastus
+      - key: TTS_PROVIDER
+        value: azure

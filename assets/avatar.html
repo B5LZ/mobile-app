@@ -2315,6 +2315,12 @@ const V_OPEN={sil:.00,PP:.00,FF:.05,TH:.10,DD:.25,kk:.28,CH:.18,SS:.06,nn:.20,RR
 const VISEME_STRENGTH=.85;
 const MOUTH_SCALE=.72;
 const JAW_SCALE=.28;
+const AZURE_TO_RPM={
+  0:'sil',1:'aa',2:'aa',3:'O',4:'E',5:'RR',6:'I',7:'U',8:'O',9:'aa',
+  10:'O',11:'aa',12:'sil',13:'RR',14:'nn',15:'SS',16:'CH',17:'FF',18:'TH',19:'DD',20:'kk',21:'PP'
+};
+const RPM_BLENDSHAPES=['mouthOpen','jawOpen',...ALL_V.map((v)=>'viseme_'+v)];
+function rpmVisemeForAzure(id){return AZURE_TO_RPM[id]||'sil';}
 function charDur(ch){
   if('aeiou'.includes(ch))return .082;
   if('y'.includes(ch))return .074;
@@ -2341,7 +2347,7 @@ function buildTL(text,totalDuration=0){
   }
   return out;
 }
-const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
+const audioState={ctx:null,analyser:null,data:null,src:null,active:false,playStartCtxTime:0,
   async prime(){
     const Ctx=window.AudioContext||window.webkitAudioContext;
     if(!Ctx)throw new Error('Web Audio is not supported in this browser.');
@@ -2364,6 +2370,11 @@ const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
       this.src=null;
     }
     this.active=false;
+    this.playStartCtxTime=0;
+  },
+  getPlaybackTimeMs(){
+    if(!this.active||!this.ctx||!this.playStartCtxTime)return 0;
+    return Math.max(0,(this.ctx.currentTime-this.playStartCtxTime)*1000);
   },
   async playAudio(arrayBuffer,{onstart,onended}={}){
     const ctx=await this.prime();
@@ -2376,12 +2387,15 @@ const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
       if(this.src!==src)return;
       this.src=null;
       this.active=false;
+      this.playStartCtxTime=0;
       if(onended)onended();
     };
     this.src=src;
+    const startAt=ctx.currentTime+0.02;
+    this.playStartCtxTime=startAt;
     this.active=true;
     if(onstart)onstart(decoded.duration);
-    src.start(0);
+    src.start(startAt);
     return decoded.duration;
   },
   getLevels(){
@@ -2399,29 +2413,83 @@ const audioState={ctx:null,analyser:null,data:null,src:null,active:false,
     };
   }
 };
-const lipsync={active:false,tl:[],t0:0,energy:0,brightness:0,
-  play(tx,totalDuration=0){this.tl=buildTL(tx,totalDuration);this.t0=performance.now()/1000;this.active=true;},
-  stop(){this.active=false;this.tl=[];},
-  elapsed(now=performance.now()/1000){return now-this.t0;},
-  update(dt){
+const lipsync={
+  active:false,visemes:[],textTimeline:[],useTimeline:false,energy:0,brightness:0,
+  startVisemeTimeline(visemes){
+    this.visemes=Array.isArray(visemes)?visemes.slice().sort((a,b)=>a.audio_offset-b.audio_offset):[];
+    this.textTimeline=[];
+    this.useTimeline=this.visemes.length>0;
+    this.active=true;
+  },
+  playTextFallback(tx,totalDuration=0){
+    this.visemes=[];
+    this.textTimeline=buildTL(tx,totalDuration);
+    this.useTimeline=false;
+    this.active=true;
+  },
+  play(tx,totalDuration=0){this.playTextFallback(tx,totalDuration);},
+  stop(){this.active=false;this.visemes=[];this.textTimeline=[];this.useTimeline=false;},
+  getVisemeBlend(playbackMs){
+    const timeline=this.visemes;
+    if(!timeline.length)return{from:'sil',to:'sil',blend:0};
+    let idx=0;
+    for(let i=timeline.length-1;i>=0;i-=1){
+      if(timeline[i].audio_offset<=playbackMs){idx=i;break;}
+    }
+    const current=timeline[idx];
+    const next=timeline[idx+1];
+    const from=rpmVisemeForAzure(current.viseme_id);
+    if(!next)return{from,to:from,blend:1};
+    const to=rpmVisemeForAzure(next.viseme_id);
+    const span=Math.max(1,next.audio_offset-current.audio_offset);
+    const blend=Math.min(1,Math.max(0,(playbackMs-current.audio_offset)/span));
+    return{from,to,blend};
+  },
+  getTextViseme(elapsed){
     let cur='sil';
-    if(this.active){
-      const e=this.elapsed(),last=this.tl.at(-1);
-      if(last&&e>last.s+last.d+.24&&!audioState.active)this.stop();
-      else for(const ev of this.tl)if(e>=ev.s&&e<ev.s+ev.d){cur=ev.v;break;}
+    const timeline=this.textTimeline;
+    if(!timeline.length)return cur;
+    const last=timeline.at(-1);
+    if(last&&elapsed>last.s+last.d+.24&&!audioState.active)return 'sil';
+    for(const ev of timeline)if(elapsed>=ev.s&&elapsed<ev.s+ev.d){cur=ev.v;break;}
+    return cur;
+  },
+  update(dt){
+    const sp=Math.min(1,14*dt);
+    let targetWeights={};
+    if(this.active&&this.useTimeline){
+      const {from,to,blend}=this.getVisemeBlend(audioState.getPlaybackTimeMs());
+      for(const k of ALL_V)targetWeights['viseme_'+k]=0;
+      if(from===to){
+        if(from!=='sil')targetWeights['viseme_'+from]=VISEME_STRENGTH;
+      }else{
+        if(from!=='sil')targetWeights['viseme_'+from]=VISEME_STRENGTH*(1-blend);
+        if(to!=='sil')targetWeights['viseme_'+to]=VISEME_STRENGTH*blend;
+      }
+      const openFrom=(V_OPEN[from]??0)*MOUTH_SCALE;
+      const openTo=(V_OPEN[to]??0)*MOUTH_SCALE;
+      targetWeights.mouthOpen=openFrom*(1-blend)+openTo*blend;
+      targetWeights.jawOpen=targetWeights.mouthOpen*JAW_SCALE/MOUTH_SCALE;
+    }else if(this.active&&this.textTimeline.length){
+      const cur=this.getTextViseme(audioState.getPlaybackTimeMs()/1000);
+      for(const k of ALL_V)targetWeights['viseme_'+k]=cur===k?VISEME_STRENGTH:0;
+      const open=(V_OPEN[cur]??0)*MOUTH_SCALE;
+      targetWeights.mouthOpen=open;
+      targetWeights.jawOpen=open*JAW_SCALE/MOUTH_SCALE;
+    }else{
+      for(const k of ALL_V)targetWeights['viseme_'+k]=0;
+      targetWeights.mouthOpen=0;
+      targetWeights.jawOpen=0;
     }
     const levels=audioState.getLevels();
     const targetEnergy=this.active?Math.min(1,levels.energy*1.7):0;
     const targetBrightness=this.active?levels.brightness:0;
     this.energy+=(targetEnergy-this.energy)*Math.min(1,10*dt);
     this.brightness+=(targetBrightness-this.brightness)*Math.min(1,8*dt);
-    const articulation=Math.max(0,this.energy-.03);
-    const visemeAmount=this.active?VISEME_STRENGTH*(.6+articulation*.4):0;
-    const open=this.active?(V_OPEN[cur]??0)*MOUTH_SCALE*(.62+articulation*.38):0;
-    const sp=14*dt;
-    for(const k of ALL_V)lerpMorph('viseme_'+k,this.active&&k===cur?visemeAmount:0,sp);
-    lerpMorph('mouthOpen',open,sp);
-    lerpMorph('jawOpen',open*JAW_SCALE/MOUTH_SCALE,sp);
+    for(const name of RPM_BLENDSHAPES){
+      const target=targetWeights[name]??0;
+      lerpMorph(name,target,sp);
+    }
     lerpMorph('mouthSmileLeft',this.active?this.brightness*.05:0,sp);
     lerpMorph('mouthSmileRight',this.active?this.brightness*.05:0,sp);
   }
@@ -2593,15 +2661,38 @@ function b64ToAB(b64){const bin=atob(b64),buf=new Uint8Array(bin.length);for(let
    TTS
 ========================================================= */
 const ttschk=document.getElementById('ttschk');
-const TTS_VOICE='en-US-AndrewMultilingualNeural';
+const TTS_VOICE=queryParams.get('tts_voice')||'en-US-AndrewMultilingualNeural';
+const TTS_PROVIDER=queryParams.get('tts_provider')||'azure';
 let speechToken=0;
+function decodeTtsPayload(payload){
+  const visemes=Array.isArray(payload?.visemes)?payload.visemes:[];
+  const base64=payload?.base64||payload?.audio;
+  if(base64){
+    const binary=atob(base64);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return{audio:bytes.buffer,visemes};
+  }
+  throw new Error('Missing TTS audio payload');
+}
+async function parseTtsFetchResponse(response){
+  const buffer=await response.arrayBuffer();
+  if(!buffer||buffer.byteLength<64)throw new Error('TTS audio too small');
+  const bytes=new Uint8Array(buffer);
+  if(bytes[0]===0x7b){
+    try{
+      return decodeTtsPayload(JSON.parse(new TextDecoder().decode(buffer)));
+    }catch{}
+  }
+  return{audio:buffer,visemes:[]};
+}
 async function apiTts(text){
   const r=await fetchFromCandidates('/tts',{
     method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({text,voice_name:TTS_VOICE})
+    headers:withAuthHeaders({'Content-Type':'application/json'}),
+    body:JSON.stringify({text,voice_name:TTS_VOICE,provider:TTS_PROVIDER})
   },TTS_SERVER_CANDIDATES);
-  return await r.arrayBuffer();
+  return parseTtsFetchResponse(r);
 }
 function stopSpeech(status='Listening…'){
   speechToken+=1;
@@ -2621,12 +2712,13 @@ async function speak(text){
   if(!ttschk.checked){setSt('idle','Listening…');return;}
   try{
     setSt('thinking','Generating voice…');
-    const audioBuffer=await apiTts(trimmed);
+    const {audio:audioBuffer,visemes}=await apiTts(trimmed);
     if(token!==speechToken)return;
     await audioState.playAudio(audioBuffer,{
       onstart:(duration)=>{
         if(token!==speechToken){audioState.stop();return;}
-        lipsync.play(trimmed,duration);
+        if(visemes&&visemes.length)lipsync.startVisemeTimeline(visemes);
+        else lipsync.playTextFallback(trimmed,duration);
         setSt('speaking','Speaking…');
       },
       onended:()=>{

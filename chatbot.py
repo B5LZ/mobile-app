@@ -27,7 +27,19 @@ GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Iapetus")
 GEMINI_TTS_SAMPLE_RATE = 24000
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AndrewMultilingualNeural")
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") or os.getenv("AZURE_SPEECH_SUBSCRIPTION_KEY")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "eastus")
+AZURE_TTS_VOICE = os.getenv("AZURE_TTS_VOICE", "en-US-JennyNeural")
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "azure").strip().lower()
 GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "1024"))
+
+
+def _resolve_edge_voice(voice):
+    """Map Google/Azure-style voice names to a valid Edge neural voice."""
+    name = (voice or "").strip()
+    if not name or "Neural2" in name or name.startswith("en-US-Neural"):
+        return EDGE_TTS_VOICE
+    return name
 
 
 async def _edge_tts_async(text, voice):
@@ -43,12 +55,107 @@ def synthesize_edge_tts(text, voice=None):
     prompt_text = (text or "").strip()
     if not prompt_text:
         raise ValueError("Missing text for speech synthesis.")
-    audio_bytes = asyncio.run(_edge_tts_async(prompt_text, voice or EDGE_TTS_VOICE))
+    edge_voice = _resolve_edge_voice(voice)
+    audio_bytes = asyncio.run(_edge_tts_async(prompt_text, edge_voice))
     return {
         "audio_bytes": audio_bytes,
         "content_type": "audio/mpeg",
-        "voice_name": voice or EDGE_TTS_VOICE,
+        "voice_name": edge_voice,
+        "provider": "edge",
+        "visemes": [],
     }
+
+
+def synthesize_azure_tts(text, voice=None):
+    import azure.cognitiveservices.speech as speechsdk
+
+    speech_key = AZURE_SPEECH_KEY
+    speech_region = (AZURE_SPEECH_REGION or "").strip()
+    if not speech_key:
+        raise RuntimeError("Missing AZURE_SPEECH_KEY environment variable.")
+    if not speech_region:
+        raise RuntimeError("Missing AZURE_SPEECH_REGION environment variable.")
+
+    prompt_text = (text or "").strip()
+    if not prompt_text:
+        raise ValueError("Missing text for speech synthesis.")
+
+    azure_voice = (voice or AZURE_TTS_VOICE).strip()
+
+    speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+    speech_config.speech_synthesis_voice_name = azure_voice
+    speech_config.set_speech_synthesis_output_format(
+        speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3
+    )
+
+    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+    visemes = []
+
+    def _on_viseme(evt):
+        visemes.append(
+            {
+                "audio_offset": round(evt.audio_offset / 10000),
+                "viseme_id": int(evt.viseme_id),
+            }
+        )
+
+    synthesizer.viseme_received.connect(_on_viseme)
+    result = synthesizer.speak_text_async(prompt_text).get()
+
+    if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
+        cancellation = getattr(result, "cancellation_details", None)
+        detail = cancellation.reason if cancellation else result.reason
+        error_text = cancellation.error_details if cancellation else ""
+        raise RuntimeError(f"Azure TTS failed: {detail} {error_text}".strip())
+
+    audio_bytes = result.audio_data
+    if not audio_bytes:
+        raise RuntimeError("Azure TTS returned no audio data.")
+
+    visemes.sort(key=lambda item: item["audio_offset"])
+    return {
+        "audio_bytes": audio_bytes,
+        "content_type": "audio/mpeg",
+        "voice_name": azure_voice,
+        "provider": "azure",
+        "visemes": visemes,
+    }
+
+
+def synthesize_tts(text, voice=None, provider=None):
+    """Neural TTS with provider preference and automatic fallback."""
+    chosen = (provider or TTS_PROVIDER or "azure").strip().lower()
+    errors = []
+
+    if chosen == "gemini":
+        try:
+            result = synthesize_gemini_speech(text, voice_name=voice)
+            result["visemes"] = []
+            result["provider"] = "gemini"
+            return result
+        except Exception as exc:
+            errors.append(f"gemini: {exc}")
+        chosen = "edge"
+
+    if chosen == "azure":
+        try:
+            return synthesize_azure_tts(text, voice=voice)
+        except Exception as exc:
+            errors.append(f"azure: {exc}")
+        chosen = "edge"
+
+    if chosen == "edge":
+        try:
+            return synthesize_edge_tts(text, voice=voice)
+        except Exception as exc:
+            errors.append(f"edge: {exc}")
+            raise RuntimeError("; ".join(errors) or "TTS failed") from exc
+
+    try:
+        return synthesize_edge_tts(text, voice=voice)
+    except Exception as exc:
+        errors.append(f"edge: {exc}")
+        raise RuntimeError("; ".join(errors) or "TTS failed") from exc
 
 
 def pcm_to_wav_bytes(pcm_bytes, channels=1, sample_rate=GEMINI_TTS_SAMPLE_RATE, sample_width=2):

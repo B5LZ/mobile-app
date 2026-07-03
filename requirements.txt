@@ -2,3 +2,4 @@ trafilatura
 google-generativeai
 python-dotenv
 edge-tts
+azure-cognitiveservices-speech

@@ -1,3 +1,4 @@
+import base64
 import json
 import hmac
 import os
@@ -19,7 +20,7 @@ from chatbot import (
     find_activity,
     load_mindfulness_activities,
     summarize_history,
-    synthesize_edge_tts,
+    synthesize_tts,
 )
 
 
@@ -655,6 +656,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
         text = str(payload.get("text", "")).strip()
         voice_name = str(payload.get("voice_name", "")).strip() or None
+        provider = str(payload.get("provider", "")).strip() or None
 
         if not text:
             send_error_json(self, 400, "Missing text")
@@ -671,15 +673,20 @@ class ChatHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            result = synthesize_edge_tts(text=text, voice=voice_name)
+            result = synthesize_tts(text=text, voice=voice_name, provider=provider)
         except Exception:
             send_error_json(self, 502, "Speech service unavailable")
             return
 
-        send_bytes(
+        send_json(
             self,
-            payload=result["audio_bytes"],
-            content_type=result["content_type"],
+            {
+                "audio": base64.b64encode(result["audio_bytes"]).decode("ascii"),
+                "audio_content_type": result.get("content_type", "audio/mpeg"),
+                "visemes": result.get("visemes", []),
+                "voice_name": result.get("voice_name"),
+                "provider": result.get("provider"),
+            },
         )
 
     def handle_activity_select(self):

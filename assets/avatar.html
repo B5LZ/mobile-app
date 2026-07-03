@@ -2780,7 +2780,13 @@ function finalizeLoadedModel(root, animations){
       morphRefs[child.name]={mesh:child,dict:child.morphTargetDictionary};
     }
   });
-  const clips=animations||[];
+  const clips=(animations||[]).map((clip)=>{
+    const filteredTracks=(clip.tracks||[]).filter((track)=>
+      !String(track.name||'').includes('.morphTargetInfluences')
+    );
+    if(filteredTracks.length===clip.tracks.length)return clip;
+    return new THREE.AnimationClip(clip.name, clip.duration, filteredTracks);
+  });
   if(!clips.length)applyRelaxedArmPose(root);
   avatarRoot=root;
   boneSpeech.bind(root);
@@ -2872,7 +2878,7 @@ function finalizeLoadedModel(root, animations){
    TTS
 ========================================================= */
 const ttschk=document.getElementById('ttschk');
-const TTS_VOICE=queryParams.get('tts_voice')||'en-US-JennyNeural';
+const TTS_VOICE=queryParams.get('tts_voice')||'en-US-GuyNeural';
 const TTS_PROVIDER=queryParams.get('tts_provider')||'azure';
 const REMOTE_SERVER='https://multilingual-virtual-assistant.onrender.com';
 const LOCAL_SERVER='http://127.0.0.1:8000';

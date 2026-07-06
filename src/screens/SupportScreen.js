@@ -86,6 +86,11 @@ export default function SupportScreen() {
           {t('support') || 'Support'}
         </Text>
 
+        <View style={styles.aboutCard}>
+          <Text style={styles.aboutTitle}>{t('supportAboutTitle')}</Text>
+          <Text style={styles.aboutText}>{t('supportAboutText')}</Text>
+        </View>
+
         {/* FORM */}
         <View style={styles.card}>
 
@@ -206,6 +211,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#1f3c88',
     marginBottom: 16,
+  },
+
+  aboutCard: {
+    backgroundColor: '#eef3fb',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+  },
+
+  aboutTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#1f3c88',
+    marginBottom: 8,
+  },
+
+  aboutText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#334155',
   },
 
   card: {

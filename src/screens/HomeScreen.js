@@ -6,7 +6,6 @@ import {
   useLayoutEffect,
 } from 'react';
 import {
-  Alert,
   Animated,
   BackHandler,
   Easing,
@@ -23,13 +22,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useEventListener } from 'expo';
 import { useAudioPlayer } from 'expo-audio';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth';
+import { onAuthStateChanged, updateProfile } from 'firebase/auth';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
 import { useLanguage } from '../context/LanguageContext';
 import { ThemeColor, ThemeRadius } from '../theme/appTheme';
+import { Ionicons } from '@expo/vector-icons';
 import { recordCompletedSession } from '../utils/sessionTracking';
 import SESSION_CAPTIONS from '../data/sessionCaptions';
+import { getDailyQuote } from '../data/homeQuotes';
 
 // ─── Session catalog ──────────────────────────────────────────────────────────
 
@@ -45,8 +46,8 @@ const sessionCatalog = [
   { id: 'affirmation-breath', title: 'Affirmation Breath',        description: 'Pair a calming phrase with your breath.',                    kind: 'placeholder', duration: 'Coming soon' },
   { id: 'stress-release',     title: 'Stress Release Check-In',   description: 'Notice, name, and soften what you are carrying.',            kind: 'placeholder', duration: 'Coming soon' },
   { id: 'morning-intention',  title: 'Morning Intention',         description: 'A simple intention-setting practice for the day.',           kind: 'placeholder', duration: 'Coming soon' },
-  { id: 'sleep-wind-down',    title: 'Sleep Wind Down',           description: 'A quiet practice to prepare your body for rest.',            kind: 'placeholder', duration: 'Coming soon' },
-].map((s, i) => ({ ...s, number: String(i + 1).padStart(2, '0') }));
+  { id: 'sleep-wind-down',    title: 'Sleep Wind Down',           description: 'A quiet practice to prepare your body for rest.',            kind: 'placeholder', duration: '' },
+];
 
 // ─── Session video timeline ───────────────────────────────────────────────────
 // Each chapter is a pre-recorded, lip-synced video. `pauseDuration` (seconds)
@@ -165,6 +166,12 @@ function BreathingBreakOverlay({ title, body, durationSeconds, onContinue }) {
   const scale = useRef(new Animated.Value(1)).current;
   const [secondsLeft, setSecondsLeft] = useState(durationSeconds);
   const breathSound = useAudioPlayer(BREATHING_SOUND);
+  const onContinueRef = useRef(onContinue);
+  onContinueRef.current = onContinue;
+
+  const handleContinue = useCallback(() => {
+    onContinueRef.current?.();
+  }, []);
 
   useEffect(() => {
     scale.setValue(1);
@@ -201,35 +208,37 @@ function BreathingBreakOverlay({ title, body, durationSeconds, onContinue }) {
   }, []);
 
   return (
-    <ScrollView
-      style={styles.breakOverlayScroll}
-      contentContainerStyle={styles.breakOverlayContent}
-      showsVerticalScrollIndicator={false}
-      bounces={false}
-    >
-      {secondsLeft > 0 ? (
-        <View style={styles.breakCircleWrap} pointerEvents="none">
-          <Animated.View style={[styles.breakCircle, { transform: [{ scale }] }]} />
-          <Text style={styles.breakTimerText}>{secondsLeft}</Text>
-        </View>
-      ) : (
-        <Text style={styles.breakReadyText}>
-          Press Continue when you&apos;re ready to continue.
-        </Text>
-      )}
-      {!!title && <Text style={styles.breakTitle}>{title}</Text>}
-      {!!body && <Text style={styles.breakBody}>{body}</Text>}
-      {!!onContinue && (
+    <View style={styles.breakOverlay} pointerEvents="auto" collapsable={false}>
+      <View style={styles.breakOverlayContent}>
+        {secondsLeft > 0 ? (
+          <View style={styles.breakCircleWrap} pointerEvents="none">
+            <Animated.View style={[styles.breakCircle, { transform: [{ scale }] }]} />
+            <Text style={styles.breakTimerText}>{secondsLeft}</Text>
+          </View>
+        ) : (
+          <Text style={styles.breakReadyText}>
+            Press Continue when you&apos;re ready to continue.
+          </Text>
+        )}
+        {!!title && <Text style={styles.breakTitle}>{title}</Text>}
+        {!!body && <Text style={styles.breakBody}>{body}</Text>}
         <Pressable
-          style={({ pressed }) => [styles.breakContinueBtn, pressed && styles.btnPressed]}
-          onPress={onContinue}
+          style={({ pressed }) => [
+            styles.breakContinueBtn,
+            secondsLeft > 0 && styles.breakContinueBtnWaiting,
+            pressed && styles.btnPressed,
+          ]}
+          onPress={handleContinue}
+          disabled={secondsLeft > 0}
+          hitSlop={16}
           accessibilityRole="button"
           accessibilityLabel="Continue to the next part"
+          accessibilityState={{ disabled: secondsLeft > 0 }}
         >
           <Text style={styles.breakContinueBtnText}>Continue</Text>
         </Pressable>
-      )}
-    </ScrollView>
+      </View>
+    </View>
   );
 }
 
@@ -342,8 +351,25 @@ function SessionVideoPanel({
   const skipMidPause = useCallback(() => {
     setActivePausePoint(null);
     onMidBreakChange?.(false);
+    player.playbackRate = PLAYBACK_RATE;
     player.play();
   }, [player, onMidBreakChange]);
+
+  const skipMidPauseRef = useRef(skipMidPause);
+  skipMidPauseRef.current = skipMidPause;
+  const onSkipChapterBreakRef = useRef(onSkipChapterBreak);
+  onSkipChapterBreakRef.current = onSkipChapterBreak;
+
+  const handleBreakContinue = useCallback(() => {
+    if (activePausePoint) {
+      skipMidPauseRef.current();
+    } else {
+      onSkipChapterBreakRef.current?.();
+    }
+  }, [activePausePoint]);
+
+  const handleBreakContinueRef = useRef(handleBreakContinue);
+  handleBreakContinueRef.current = handleBreakContinue;
 
   // ── Transport controls ──
   const seekBy = useCallback((seconds) => {
@@ -376,7 +402,7 @@ function SessionVideoPanel({
       title: overlayTitle,
       body: overlayBody,
       durationSeconds: overlayDuration,
-      onContinue: activePausePoint ? skipMidPause : onSkipChapterBreak,
+      onContinue: () => handleBreakContinueRef.current(),
       overlayKey: activePausePoint ? activePausePoint.key : `${chapter?.key}-break`,
     } : null);
   }, [
@@ -386,14 +412,15 @@ function SessionVideoPanel({
     overlayDuration,
     activePausePoint,
     chapter?.key,
-    skipMidPause,
-    onSkipChapterBreak,
     onBreakOverlayChange,
   ]);
 
   return (
     <View style={styles.sessionVideoPanel}>
-      <View style={styles.sessionVideoFrame}>
+      <View
+        style={styles.sessionVideoFrame}
+        pointerEvents={inBreak ? 'none' : 'box-none'}
+      >
         <VideoView
           player={player}
           style={styles.sessionVideo}
@@ -451,7 +478,7 @@ function SummaryModal({ visible, duration, summary, onClose }) {
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
 export default function HomeScreen({ navigation }) {
-  const { locale, setLocale, t } = useLanguage();
+  const { t, locale } = useLanguage();
 
   // ── Screen ──
   const [screen, setScreen]                       = useState('home');
@@ -575,19 +602,7 @@ export default function HomeScreen({ navigation }) {
     [],
   );
 
-  // ── Auth ──
-  const handleLogout = useCallback(async () => {
-    try { await signOut(auth); } catch { /* ignore */ }
-  }, []);
-
-  const toggleLanguage = useCallback(() => {
-    void setLocale(locale === 'en' ? 'ko' : 'en');
-  }, [locale, setLocale]);
-
-  const handleSettings = useCallback(() => {
-    Alert.alert(t('cardSettingsTitle'), 'Coming soon.');
-  }, [t]);
-
+  // ── Session logic ──
   const clearBreakTimer = useCallback(() => {
     if (breakTimerRef.current) {
       clearTimeout(breakTimerRef.current);
@@ -595,7 +610,6 @@ export default function HomeScreen({ navigation }) {
     }
   }, []);
 
-  // ── Session logic ──
   const openSession = useCallback((id) => {
     setSelectedSessionId(id);
     setScreen('session');
@@ -689,43 +703,26 @@ export default function HomeScreen({ navigation }) {
 
   // Continue button on a between-chapter breathing break — only way to advance.
   const skipChapterBreak = useCallback(() => {
-    if (!chapterBreakPendingRef.current && !isBreathingBreak) return;
+    if (!chapterBreakPendingRef.current) return;
     chapterBreakPendingRef.current = false;
     setIsBreathingBreak(false);
     setBreakOverlay(null);
     advanceChapter();
-  }, [isBreathingBreak, advanceChapter]);
+  }, [advanceChapter]);
 
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
 
-      {/* ── Header — home screen only; the session screen stays uncluttered ── */}
+      {/* ── Header — greeting only; language & log out live on Profile tab ── */}
       {screen === 'home' && (
       <View style={styles.header}>
-        <View style={styles.langContainer}>
-          <Text style={styles.globeText}>Language</Text>
-          <Pressable
-            onPress={toggleLanguage}
-            style={({ pressed }) => [styles.langBtn, pressed && styles.topBtnPressed]}
-            accessibilityRole="button"
-          >
-            <Text style={styles.langBtnText}>{locale.toUpperCase()}</Text>
-          </Pressable>
-        </View>
         <Text style={styles.headerTitle}>
           {t('homeTitle', {
             name: homeGreetingName || t('homeTitleFallbackName'),
           })}
         </Text>
-        <Pressable
-          onPress={handleLogout}
-          style={({ pressed }) => [styles.logoutBtn, pressed && styles.topBtnPressed]}
-          accessibilityRole="button"
-        >
-          <Text style={styles.logoutText}>{t('logOut')}</Text>
-        </Pressable>
       </View>
       )}
 
@@ -737,52 +734,60 @@ export default function HomeScreen({ navigation }) {
           showsVerticalScrollIndicator
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.hero}>
-            <Text style={styles.heroEyebrow}>{t('guideEyebrow')}</Text>
-            <Text style={styles.heroBody}>{t('guideHeroBody')}</Text>
-            <View style={styles.heroActions}>
-              <Pressable style={({ pressed }) => [styles.heroBtnPrimary, pressed && styles.btnPressed]} onPress={() => openSession(sessionCatalog[0].id)}>
-                <Text style={styles.heroBtnPrimaryText}>{t('startCaregiverFatigue')}</Text>
-              </Pressable>
-              <Pressable style={({ pressed }) => [styles.heroBtnSecondary, pressed && styles.btnPressed]} onPress={() => openSession(selectedSessionId)}>
-                <Text style={styles.heroBtnSecondaryText}>{t('exploreSessions')}</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {sessionActive && (
-            <View style={styles.resumeCard}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.resumeTitle}>{t('sessionInProgress')}</Text>
-                <Text style={styles.resumeBody}>{t('sessionStillActive', { title: selectedSession.title })}</Text>
+          {sessionActive ? (
+            <Pressable
+              style={({ pressed }) => [styles.resumeHeroCard, pressed && styles.btnPressed]}
+              onPress={() => setScreen('session')}
+              accessibilityRole="button"
+              accessibilityLabel={t('resumeSession')}
+            >
+              <Text style={styles.resumeHeroEyebrow}>{t('sessionInProgress')}</Text>
+              <Text style={styles.resumeHeroTitle}>{selectedSession.title}</Text>
+              <Text style={styles.resumeHeroBody}>
+                {t('sessionStillActive', { title: selectedSession.title })}
+              </Text>
+              <Text style={styles.resumeHeroHint}>{t('resumeSessionHint')}</Text>
+              <View style={styles.resumeHeroBtn}>
+                <Text style={styles.resumeHeroBtnText}>{t('resumeSession')}</Text>
               </View>
-              <Pressable style={({ pressed }) => [styles.heroBtnPrimary, { marginTop: 0 }, pressed && styles.btnPressed]} onPress={() => setScreen('session')}>
-                <Text style={styles.heroBtnPrimaryText}>{t('resumeSession')}</Text>
-              </Pressable>
+            </Pressable>
+          ) : (
+            <View style={styles.hero}>
+              <Text style={styles.heroEyebrow}>{t('homeHeroEyebrow')}</Text>
+              <Text style={styles.heroBody}>{t('homeHeroBody')}</Text>
             </View>
           )}
 
           <Text style={styles.sectionTitle}>{t('sessionSectionTitle')}</Text>
           <View style={styles.sessionGrid}>
-            {sessionCatalog.map((s) => {
+            {(() => {
+              let availableCount = 0;
+              return sessionCatalog.map((s) => {
               const isAvailable = s.kind !== 'placeholder';
+              const displayNumber = isAvailable
+                ? String(++availableCount).padStart(2, '0')
+                : null;
               const selected  = selectedSessionId === s.id;
+              const inProgress = sessionActive && selectedSessionId === s.id;
+              const completed = !inProgress && completedSessionIds.has(s.id);
               const disabled  = sessionActive && selectedSessionId !== s.id;
-              const completed = completedSessionIds.has(s.id);
-              const badgeLabel = completed
-                ? t('sessionBadgeCompleted')
-                : isAvailable
-                  ? t('sessionBadgeAvailable')
-                  : t('sessionBadgeComingSoon');
-              const metaLabel = isAvailable ? s.duration : t('sessionDurationComingSoon');
+              const badgeLabel = inProgress
+                ? t('sessionBadgeInProgress')
+                : completed
+                  ? t('sessionBadgeCompleted')
+                  : isAvailable
+                    ? t('sessionBadgeAvailable')
+                    : t('sessionBadgeComingSoon');
+              const metaLabel = isAvailable ? s.duration : null;
               return (
                 <Pressable
                   key={s.id}
                   style={({ pressed }) => [
                     styles.sessionTile,
-                    isAvailable ? styles.sessionTileGuided : styles.sessionTilePlaceholder,
+                    isAvailable ? styles.sessionTileGuided : styles.sessionTileLocked,
+                    inProgress && styles.sessionTileInProgress,
                     completed && styles.sessionTileCompleted,
-                    selected && styles.sessionTileSelected,
+                    selected && !inProgress && styles.sessionTileSelected,
                     disabled && styles.btnDisabled,
                     pressed && !disabled && styles.btnPressed,
                   ]}
@@ -790,25 +795,36 @@ export default function HomeScreen({ navigation }) {
                   disabled={disabled}
                 >
                   <View style={styles.sessionTileTop}>
-                    <Text style={styles.sessionNumber}>{s.number}</Text>
+                    {displayNumber ? (
+                      <Text style={styles.sessionNumber}>{displayNumber}</Text>
+                    ) : (
+                      <View style={styles.sessionNumberSpacer} />
+                    )}
                     <View
                       style={[
                         styles.pill,
-                        completed
-                          ? styles.pillCompleted
-                          : isAvailable
-                            ? styles.pillGuided
-                            : styles.pillEmpty,
+                        inProgress
+                          ? styles.pillInProgress
+                          : completed
+                            ? styles.pillCompleted
+                            : isAvailable
+                              ? styles.pillGuided
+                              : styles.pillLocked,
                       ]}
                     >
+                      {!isAvailable && (
+                        <Ionicons name="lock-closed" size={11} color={ThemeColor.WHITE} style={styles.pillLockIcon} />
+                      )}
                       <Text
                         style={[
                           styles.pillText,
-                          completed
-                            ? styles.pillTextCompleted
-                            : isAvailable
-                              ? styles.pillTextGuided
-                              : styles.pillTextEmpty,
+                          inProgress
+                            ? styles.pillTextInProgress
+                            : completed
+                              ? styles.pillTextCompleted
+                              : isAvailable
+                                ? styles.pillTextGuided
+                                : styles.pillTextLocked,
                         ]}
                       >
                         {badgeLabel}
@@ -816,24 +832,33 @@ export default function HomeScreen({ navigation }) {
                     </View>
                   </View>
                   <Text style={styles.sessionTileTitle}>{s.title}</Text>
-                  {!!s.description && <Text style={styles.sessionTileDesc}>{s.description}</Text>}
-                  <Text style={styles.sessionTileMeta}>{metaLabel}</Text>
+                  {!!s.description && (
+                    <Text style={[styles.sessionTileDesc, !isAvailable && styles.sessionTileDescLocked]}>
+                      {s.description}
+                    </Text>
+                  )}
+                  {metaLabel ? (
+                    <Text style={styles.sessionTileMeta}>{metaLabel}</Text>
+                  ) : null}
                 </Pressable>
               );
-            })}
+            });
+            })()}
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{t('cardAboutTitle')}</Text>
-            <Text style={styles.cardText}>{t('cardAboutText')}</Text>
+          <View style={styles.encouragementSection}>
+            <Text style={styles.quoteLabel}>{t('homeQuoteLabel')}</Text>
+            <Text style={styles.quoteText}>{getDailyQuote(locale)}</Text>
           </View>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{t('cardUpdatesTitle')}</Text>
-            <Text style={styles.cardText}>{t('cardUpdatesText')}</Text>
-          </View>
-          <Pressable onPress={handleSettings} style={({ pressed }) => [styles.card, pressed && styles.btnPressed]}>
-            <Text style={styles.cardTitle}>{t('cardSettingsTitle')}</Text>
-            <Text style={styles.cardText}>{t('cardSettingsText')}</Text>
+
+          <Pressable
+            style={({ pressed }) => [styles.supportBtn, pressed && styles.btnPressed]}
+            onPress={() => navigation.navigate('Support')}
+            accessibilityRole="button"
+            accessibilityLabel={t('homeContactSupport')}
+          >
+            <Ionicons name="help-circle-outline" size={24} color={ThemeColor.WHITE} />
+            <Text style={styles.supportBtnText}>{t('homeContactSupport')}</Text>
           </Pressable>
         </ScrollView>
       )}
@@ -1009,29 +1034,74 @@ const styles = StyleSheet.create({
   container: { padding: 16, paddingBottom: 32, maxWidth: 520, width: '100%', alignSelf: 'center' },
 
   // Header
-  header:        { backgroundColor: ThemeColor.BRAND, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 14 },
-  headerTitle:   { flex: 1, color: ThemeColor.WHITE, fontSize: 18, fontWeight: '700', textAlign: 'center', paddingHorizontal: 8 },
-  langContainer: { width: 92, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  globeText:     { color: ThemeColor.WHITE, fontSize: 11, fontWeight: '700' },
-  langBtn:       { minWidth: 34, minHeight: 30, alignItems: 'center', justifyContent: 'center', borderRadius: ThemeRadius.SM, backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
-  langBtnText:   { color: ThemeColor.WHITE, fontSize: 13, fontWeight: '700' },
-  logoutBtn:     { width: 92, alignItems: 'flex-end', paddingVertical: 6 },
-  logoutText:    { color: ThemeColor.WHITE, fontWeight: '700', fontSize: 14 },
+  header: {
+    backgroundColor: ThemeColor.BRAND,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  headerTitle: {
+    color: ThemeColor.WHITE,
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
 
-  // Hero
-  hero:                { borderRadius: 16, backgroundColor: ThemeColor.BRAND, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 12, gap: 8 },
-  heroEyebrow:         { color: 'rgba(255,255,255,0.72)', fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
-  heroBody:            { color: 'rgba(255,255,255,0.84)', fontSize: 14, lineHeight: 21 },
-  heroActions:         { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
-  heroBtnPrimary:      { backgroundColor: ThemeColor.WHITE, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 16 },
-  heroBtnPrimaryText:  { color: ThemeColor.BRAND, fontWeight: '800', fontSize: 14 },
-  heroBtnSecondary:    { borderRadius: 10, paddingVertical: 11, paddingHorizontal: 16, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)' },
-  heroBtnSecondaryText:{ color: ThemeColor.WHITE, fontWeight: '700', fontSize: 14 },
+  // Hero (no session in progress)
+  hero:                { borderRadius: 16, backgroundColor: ThemeColor.BRAND, paddingHorizontal: 18, paddingVertical: 18, marginBottom: 12, gap: 8, alignItems: 'center' },
+  heroEyebrow:         { color: ThemeColor.WHITE, fontSize: 22, fontWeight: '900', lineHeight: 28, textAlign: 'center' },
+  heroBody:            { color: 'rgba(255,255,255,0.92)', fontSize: 17, lineHeight: 24, fontWeight: '600', textAlign: 'center' },
 
-  // Resume banner
-  resumeCard:  { backgroundColor: ThemeColor.WHITE, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, ...cardShadow },
-  resumeTitle: { fontSize: 14, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY, marginBottom: 2 },
-  resumeBody:  { fontSize: 13, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 18 },
+  // Resume hero (session in progress — primary home action)
+  resumeHeroCard: {
+    backgroundColor: ThemeColor.WHITE,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    gap: 8,
+    borderWidth: 2,
+    borderColor: ThemeColor.BRAND,
+    ...cardShadow,
+  },
+  resumeHeroEyebrow: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: ThemeColor.BRAND,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  resumeHeroTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: ThemeColor.TEXT_PRIMARY,
+    lineHeight: 30,
+  },
+  resumeHeroBody: {
+    fontSize: 16,
+    color: ThemeColor.HOME_CARD_TEXT,
+    lineHeight: 23,
+  },
+  resumeHeroHint: {
+    fontSize: 14,
+    color: ThemeColor.HOME_SUBTITLE,
+    lineHeight: 20,
+    marginTop: 2,
+  },
+  resumeHeroBtn: {
+    backgroundColor: ThemeColor.BRAND,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+    width: '100%',
+    marginTop: 10,
+  },
+  resumeHeroBtnText: {
+    color: ThemeColor.WHITE,
+    fontWeight: '800',
+    fontSize: 18,
+  },
 
   // ── Session video panel (fills remaining viewport, replaces avatar WebView) ──
   videoSection: {
@@ -1096,14 +1166,15 @@ const styles = StyleSheet.create({
   },
 
   // Breathing-break overlay (sits above the video frame, not clipped by it)
-  breakOverlayScroll: {
+  breakOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(8,15,35,0.55)',
     borderRadius: 16,
     zIndex: 10,
+    elevation: 24,
   },
   breakOverlayContent: {
-    flexGrow: 1,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
@@ -1143,14 +1214,19 @@ const styles = StyleSheet.create({
   breakTitle: { color: ThemeColor.WHITE, fontSize: 18, fontWeight: '800', textAlign: 'center' },
   breakBody:  { color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 20, textAlign: 'center' },
   breakContinueBtn: {
-    marginTop: 4,
-    minHeight: 48,
-    minWidth: 180,
-    paddingHorizontal: 24,
-    borderRadius: 12,
+    marginTop: 8,
+    minHeight: 56,
+    minWidth: 220,
+    paddingHorizontal: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: ThemeColor.WHITE,
+    borderWidth: 2,
+    borderColor: ThemeColor.WHITE,
+  },
+  breakContinueBtnWaiting: {
+    opacity: 0.45,
   },
   breakContinueBtnText: {
     color: '#0d1b36',
@@ -1194,29 +1270,75 @@ const styles = StyleSheet.create({
   sessionGrid:            { gap: 10, marginBottom: 20 },
   sessionTile:            { width: '100%', borderRadius: 14, padding: 16, gap: 8, borderWidth: 1.5 },
   sessionTileGuided:      { backgroundColor: '#e8edf7', borderColor: 'rgba(31,60,136,0.2)' },
-  sessionTilePlaceholder: { backgroundColor: ThemeColor.WHITE, borderColor: 'rgba(31,60,136,0.1)' },
+  sessionTileLocked:      { backgroundColor: ThemeColor.WHITE, borderColor: 'rgba(31,60,136,0.25)' },
+  sessionTileInProgress:  { borderColor: ThemeColor.BRAND, borderWidth: 2, backgroundColor: '#e8edf7' },
   sessionTileCompleted:   { backgroundColor: '#dcfce7', borderColor: '#16a34a' },
   sessionTileSelected:    { borderColor: ThemeColor.BRAND, borderWidth: 2 },
   sessionTileTop:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sessionNumber:          { fontSize: 20, fontWeight: '900', color: ThemeColor.BRAND },
+  sessionNumberSpacer:      { width: 36 },
   sessionTileTitle:       { fontSize: 16, fontWeight: '800', color: ThemeColor.TEXT_PRIMARY, lineHeight: 22 },
   sessionTileDesc:        { fontSize: 14, color: ThemeColor.HOME_CARD_TEXT, lineHeight: 21 },
+  sessionTileDescLocked:  { color: ThemeColor.HOME_CARD_TEXT },
   sessionTileMeta:        { fontSize: 13, color: ThemeColor.HOME_SUBTITLE, fontWeight: '600' },
 
   // Pills
-  pill:              { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  pill:              { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, gap: 4 },
   pillGuided:        { backgroundColor: ThemeColor.BRAND },
-  pillEmpty:         { backgroundColor: '#e8edf7' },
+  pillInProgress:    { backgroundColor: '#2563eb' },
+  pillLocked:        { backgroundColor: '#475569' },
   pillCompleted:     { backgroundColor: '#16a34a' },
   pillText:          { fontSize: 11, fontWeight: '800' },
   pillTextGuided:    { color: ThemeColor.WHITE },
-  pillTextEmpty:     { color: ThemeColor.HOME_SUBTITLE },
+  pillTextInProgress:{ color: ThemeColor.WHITE },
+  pillTextLocked:    { color: ThemeColor.WHITE },
   pillTextCompleted: { color: ThemeColor.WHITE },
+  pillLockIcon:      { marginRight: 1 },
 
-  // Info cards
-  card:          { backgroundColor: ThemeColor.WHITE, padding: 20, borderRadius: 8, borderTopWidth: 4, borderTopColor: ThemeColor.BRAND, marginBottom: 14, ...cardShadow },
-  cardTitle:     { fontSize: 18, fontWeight: '700', color: ThemeColor.BRAND, marginBottom: 5 },
-  cardText:      { color: ThemeColor.HOME_CARD_TEXT, lineHeight: 22 },
+  // Home encouragement footer
+  encouragementSection: {
+    marginTop: 8,
+    marginBottom: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 4,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(31,60,136,0.12)',
+  },
+  quoteLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: ThemeColor.HOME_SUBTITLE,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  quoteText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: ThemeColor.TEXT_PRIMARY,
+    lineHeight: 30,
+    fontStyle: 'italic',
+  },
+  supportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: ThemeColor.BRAND,
+    borderRadius: 14,
+    minHeight: 56,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    marginBottom: 8,
+    ...cardShadow,
+  },
+  supportBtnText: {
+    color: ThemeColor.WHITE,
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    flexShrink: 1,
+  },
 
   // ── Session screen V2 (senior-friendly) ──
   v2Root: {
@@ -1363,5 +1485,4 @@ const styles = StyleSheet.create({
   // Shared
   btnDisabled:   { opacity: 0.4 },
   btnPressed:    { opacity: 0.85 },
-  topBtnPressed: { opacity: 0.82 },
 });

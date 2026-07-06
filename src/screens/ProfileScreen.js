@@ -1,6 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import {
-  Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,77 +14,120 @@ import { auth } from '../config/firebaseConfig';
 import { ThemeColor, ThemeRadius } from '../theme/appTheme';
 import { useLanguage } from '../context/LanguageContext';
 
-
-
-
-export default function ProfileScreen({ navigation }) {
-    function ProfileButton({ label, onPress, isDanger }) {
+function ProfileButton({ label, onPress, isDanger, showArrow = true }) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        pressed && styles.cardPressed,
-      ]}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      accessibilityRole="button"
     >
       <View style={styles.cardInner}>
-        <Text style={[styles.cardText, isDanger && styles.dangerText]}>
-          {label}
-        </Text>
-        <Text style={styles.arrow}>›</Text>
+        <Text style={[styles.cardText, isDanger && styles.dangerText]}>{label}</Text>
+        {showArrow ? <Text style={styles.arrow}>›</Text> : null}
       </View>
     </Pressable>
   );
 }
 
+export default function ProfileScreen({ navigation }) {
+  const { locale, setLocale, t } = useLanguage();
+  const [logoutVisible, setLogoutVisible] = useState(false);
 
-  const { t } = useLanguage();
-
-/* handles user logout*/
   const handleLogout = useCallback(async () => {
+    setLogoutVisible(false);
     try {
       await signOut(auth);
-    } catch {}
-    // Auth listener in App.js switches to SignIn/SignUp; do not reset here — Tab navigator has no "SignIn" route.
+    } catch {
+      // Auth listener in App.js switches to SignIn/SignUp.
+    }
   }, []);
-
 
   const goTo = (screen) => {
     navigation.navigate(screen);
   };
 
-
-  /*UI*/
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>{t('profileTitle') || 'Profile'}</Text>
 
+        <View style={styles.languageCard}>
+          <Text style={styles.sectionLabel}>{t('languageHeading')}</Text>
+          <View style={styles.langRow}>
+            <Pressable
+              style={[styles.langBtn, locale === 'en' && styles.langBtnActive]}
+              onPress={() => void setLocale('en')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: locale === 'en' }}
+            >
+              <Text style={[styles.langBtnText, locale === 'en' && styles.langBtnTextActive]}>
+                {t('langEnglish')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.langBtn, locale === 'ko' && styles.langBtnActive]}
+              onPress={() => void setLocale('ko')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: locale === 'ko' }}
+            >
+              <Text style={[styles.langBtnText, locale === 'ko' && styles.langBtnTextActive]}>
+                {t('langKorean')}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.section}>
+          <ProfileButton
+            label={t('myStatsMenuLabel')}
+            onPress={() => goTo('MyStats')}
+          />
           <ProfileButton
             label={t('personalInformation')}
             onPress={() => goTo('PersonalInfo')}
           />
-          <ProfileButton
-            label={t('settings')}
-            onPress={() => goTo('Settings')}
-          />
-          <ProfileButton
-            label={t('support')}
-            onPress={() => goTo('Support')}
-          />
+          <ProfileButton label={t('settings')} onPress={() => goTo('Settings')} />
+          <ProfileButton label={t('support')} onPress={() => goTo('Support')} />
           <ProfileButton
             label={t('logOut')}
-            onPress={handleLogout}
+            onPress={() => setLogoutVisible(true)}
             isDanger
+            showArrow={false}
           />
         </View>
       </ScrollView>
+
+      <Modal
+        visible={logoutVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLogoutVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('logoutConfirmTitle')}</Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={({ pressed }) => [styles.modalBtnNo, pressed && styles.cardPressed]}
+                onPress={() => setLogoutVisible(false)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.modalBtnNoText}>{t('logoutConfirmNo')}</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.modalBtnYes, pressed && styles.cardPressed]}
+                onPress={() => void handleLogout()}
+                accessibilityRole="button"
+              >
+                <Text style={styles.modalBtnYesText}>{t('logoutConfirmYes')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-
-
 
 const cardShadow = Platform.select({
   ios: {
@@ -106,13 +149,51 @@ const styles = StyleSheet.create({
     maxWidth: 480,
     width: '100%',
     alignSelf: 'center',
+    paddingBottom: 32,
   },
   title: {
     fontSize: 26,
     fontWeight: '700',
     color: ThemeColor.BRAND,
-    marginBottom: 20,
+    marginBottom: 16,
   },
+  languageCard: {
+    backgroundColor: ThemeColor.WHITE,
+    borderRadius: ThemeRadius.MD,
+    borderWidth: 1,
+    borderColor: ThemeColor.INPUT_BORDER_SOFT,
+    padding: 16,
+    marginBottom: 16,
+    ...cardShadow,
+  },
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: ThemeColor.HOME_CARD_TEXT,
+    marginBottom: 10,
+  },
+  langRow: { flexDirection: 'row', gap: 10 },
+  langBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    minHeight: 52,
+    borderRadius: ThemeRadius.SM,
+    borderWidth: 2,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#e8edf2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  langBtnActive: {
+    backgroundColor: ThemeColor.BRAND,
+    borderColor: ThemeColor.BRAND,
+  },
+  langBtnText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: ThemeColor.TEXT_PRIMARY,
+  },
+  langBtnTextActive: { color: ThemeColor.WHITE },
   section: {
     gap: 12,
   },
@@ -138,7 +219,7 @@ const styles = StyleSheet.create({
     color: ThemeColor.HOME_CARD_TEXT,
   },
   dangerText: {
-    color: 'red',
+    color: '#b91c1c',
   },
   arrow: {
     fontSize: 22,
@@ -147,37 +228,60 @@ const styles = StyleSheet.create({
   cardPressed: {
     opacity: 0.85,
   },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: ThemeColor.WHITE,
+    borderRadius: 20,
+    padding: 24,
+    gap: 24,
+    ...cardShadow,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: ThemeColor.TEXT_PRIMARY,
+    textAlign: 'center',
+    lineHeight: 30,
+  },
+  modalActions: {
+    gap: 12,
+  },
+  modalBtnNo: {
+    minHeight: 56,
+    borderRadius: 14,
+    backgroundColor: '#e8edf2',
+    borderWidth: 2,
+    borderColor: '#cbd5e1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  modalBtnNoText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: ThemeColor.TEXT_PRIMARY,
+    textAlign: 'center',
+  },
+  modalBtnYes: {
+    minHeight: 56,
+    borderRadius: 14,
+    backgroundColor: '#b91c1c',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  modalBtnYesText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: ThemeColor.WHITE,
+    textAlign: 'center',
+  },
 });
-
-
-
-
-/*Previous profile button code:
-        <View style={styles.accountWrap}>
-          <Pressable
-            onPress={() => setShowAccountMenu((v) => !v)}
-            style={({ pressed }) => [styles.accountBtn, pressed && styles.topBtnPressed]}
-            hitSlop={10}
-          >
-            <Ionicons name="person-circle-outline" size={34} color={ThemeColor.BRAND} />
-          </Pressable>
-          {showAccountMenu && (
-            <View style={styles.accountMenu}>
-              <Pressable
-                onPress={handleSettings}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-              >
-                <Text style={styles.menuItemText}>{t('cardSettingsTitle')}</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleLogout}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-              >
-                <Text style={styles.menuItemText}>{t('logOut')}</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-
-
-*/

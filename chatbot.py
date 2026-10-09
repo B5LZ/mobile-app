@@ -30,15 +30,16 @@ GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Kore")
 GEMINI_TTS_SAMPLE_RATE = 24000
 GOOGLE_TTS_VOICE = os.getenv("GOOGLE_TTS_VOICE", "en-US-Neural2-F")
-EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-GuyNeural")
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AndrewMultilingualNeural")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") or os.getenv("AZURE_SPEECH_SUBSCRIPTION_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "eastus")
-AZURE_TTS_VOICE = os.getenv("AZURE_TTS_VOICE", "en-US-GuyNeural")
+AZURE_TTS_VOICE = os.getenv("AZURE_TTS_VOICE", "en-US-JennyNeural")
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "azure").strip().lower()
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "1024"))
 
 
 def _resolve_edge_voice(voice):
-    """Map Google-style voice names to a valid Edge neural voice."""
+    """Map Google/Azure-style voice names to a valid Edge neural voice."""
     name = (voice or "").strip()
     if not name or "Neural2" in name or name.startswith("en-US-Neural"):
         return EDGE_TTS_VOICE
@@ -173,10 +174,11 @@ def synthesize_tts(text, voice=None, provider=None):
         try:
             result = synthesize_gemini_speech(text, voice_name=voice)
             result["visemes"] = []
+            result["provider"] = "gemini"
             return result
         except Exception as exc:
             errors.append(f"gemini: {exc}")
-        chosen = "google"
+        chosen = "google" if GOOGLE_CLOUD_TTS_KEY else "edge"
 
     if chosen == "azure":
         try:
@@ -191,8 +193,11 @@ def synthesize_tts(text, voice=None, provider=None):
         except Exception as exc:
             errors.append(f"edge: {exc}")
         if GOOGLE_CLOUD_TTS_KEY:
-            return synthesize_google_tts(text, voice=voice)
-        raise RuntimeError("; ".join(errors) or "TTS failed")
+            try:
+                return synthesize_google_tts(text, voice=voice)
+            except Exception as exc:
+                errors.append(f"google: {exc}")
+        raise RuntimeError("; ".join(errors) or "TTS failed") from exc
 
     if GOOGLE_CLOUD_TTS_KEY:
         try:
@@ -201,7 +206,7 @@ def synthesize_tts(text, voice=None, provider=None):
             errors.append(f"google: {exc}")
 
     try:
-        return synthesize_edge_tts(text, voice=None)
+        return synthesize_edge_tts(text, voice=voice)
     except Exception as exc:
         errors.append(f"edge: {exc}")
         raise RuntimeError("; ".join(errors) or "TTS failed") from exc
@@ -383,7 +388,7 @@ def call_gemini_stream(prompt, model="gemini-3.1-flash-lite-preview", temperatur
         temperature=temperature,
         top_p=0.95,
         top_k=40,
-        max_output_tokens=8192,
+        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
     )
     response = model_obj.generate_content(
         prompt,
@@ -404,7 +409,7 @@ def call_gemini(prompt, model="gemini-3.1-flash-lite-preview", temperature=0.7):
         temperature=temperature,
         top_p=0.95,
         top_k=40,
-        max_output_tokens=8192,
+        max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
     )
 
     response = model_obj.generate_content(

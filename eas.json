@@ -4,6 +4,7 @@
     },
     "build": {
       "preview": {
+        "environment": "production",
         "android": {
           "buildType": "apk"
         }

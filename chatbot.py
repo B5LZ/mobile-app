@@ -6,9 +6,10 @@ import wave
 import asyncio
 import urllib.request
 import urllib.error
-import edge_tts
 import google.generativeai as genai
+import edge_tts
 from dotenv import load_dotenv
+from google.cloud import texttospeech
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -17,15 +18,18 @@ if not GOOGLE_API_KEY:
     raise RuntimeError("Missing GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
 genai.configure(api_key=GOOGLE_API_KEY)
 
+GOOGLE_CLOUD_TTS_KEY = os.getenv("GOOGLE_CLOUD_TTS_KEY")
+
 SYSTEM_PROMPT = (
     "You are a mindfulness virtual assistant for a multilingual mindfulness session. "
     "Respond with calm, supportive, and practical guidance while keeping continuity "
     "with the conversation so far."
 )
 ACTIVITIES_PATH = os.path.join(os.path.dirname(__file__), "mindfulness_activities.json")
-GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
-GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Iapetus")
+GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Kore")
 GEMINI_TTS_SAMPLE_RATE = 24000
+GOOGLE_TTS_VOICE = os.getenv("GOOGLE_TTS_VOICE", "en-US-Neural2-F")
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AndrewMultilingualNeural")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY") or os.getenv("AZURE_SPEECH_SUBSCRIPTION_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "eastus")
@@ -122,6 +126,45 @@ def synthesize_azure_tts(text, voice=None):
     }
 
 
+def synthesize_google_tts(text, voice=None, language_code=None):
+    if not GOOGLE_CLOUD_TTS_KEY:
+        raise RuntimeError("Missing GOOGLE_CLOUD_TTS_KEY environment variable.")
+
+    prompt_text = (text or "").strip()
+    if not prompt_text:
+        raise ValueError("Missing text for speech synthesis.")
+
+    client = texttospeech.TextToSpeechClient(
+        client_options={"api_key": GOOGLE_CLOUD_TTS_KEY}
+    )
+
+    synthesis_input = texttospeech.SynthesisInput(text=prompt_text)
+    voice_name = voice or GOOGLE_TTS_VOICE
+    voice_params = texttospeech.VoiceSelectionParams(
+        language_code=language_code or "en-US",
+        name=voice_name,
+    )
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+        speaking_rate=0.93,
+        pitch=0.0,
+    )
+
+    response = client.synthesize_speech(
+        input=synthesis_input,
+        voice=voice_params,
+        audio_config=audio_config,
+    )
+
+    return {
+        "audio_bytes": response.audio_content,
+        "content_type": "audio/mpeg",
+        "voice_name": voice_name,
+        "provider": "google",
+        "visemes": [],
+    }
+
+
 def synthesize_tts(text, voice=None, provider=None):
     """Neural TTS with provider preference and automatic fallback."""
     chosen = (provider or TTS_PROVIDER or "azure").strip().lower()
@@ -135,7 +178,7 @@ def synthesize_tts(text, voice=None, provider=None):
             return result
         except Exception as exc:
             errors.append(f"gemini: {exc}")
-        chosen = "edge"
+        chosen = "google" if GOOGLE_CLOUD_TTS_KEY else "edge"
 
     if chosen == "azure":
         try:
@@ -149,7 +192,18 @@ def synthesize_tts(text, voice=None, provider=None):
             return synthesize_edge_tts(text, voice=voice)
         except Exception as exc:
             errors.append(f"edge: {exc}")
-            raise RuntimeError("; ".join(errors) or "TTS failed") from exc
+        if GOOGLE_CLOUD_TTS_KEY:
+            try:
+                return synthesize_google_tts(text, voice=voice)
+            except Exception as exc:
+                errors.append(f"google: {exc}")
+        raise RuntimeError("; ".join(errors) or "TTS failed") from exc
+
+    if GOOGLE_CLOUD_TTS_KEY:
+        try:
+            return synthesize_google_tts(text, voice=voice)
+        except Exception as exc:
+            errors.append(f"google: {exc}")
 
     try:
         return synthesize_edge_tts(text, voice=voice)
@@ -226,6 +280,7 @@ def synthesize_gemini_speech(text, voice_name=None, model=GEMINI_TTS_MODEL):
         "voice_name": voice_name or GEMINI_TTS_VOICE,
         "model": model,
         "sample_rate": GEMINI_TTS_SAMPLE_RATE,
+        "visemes": [],
     }
 
 
